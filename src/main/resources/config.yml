@@ -1,0 +1,81 @@
+# ==============================================================================
+#                 Sentinel Anti-VPN Protection Configuration
+#                        https://antivpn.tech
+# ==============================================================================
+
+api:
+  # Sentinel Edge Intelligence API endpoint
+  endpoint: "https://api.antivpn.tech/v1/check"
+
+  # Your Sentinel License Key (Claim yours at https://antivpn.tech)
+  # Free developer & showcase keys: Claim on dashboard or use stl_test_showcase_demo
+  license-key: "stl_test_showcase_demo"
+
+  # HTTP connection timeout in milliseconds (2500ms recommended to avoid fail-open under lag)
+  timeout-ms: 2500
+
+# ------------------------------------------------------------------------------
+# Protection Mode:
+# ENFORCE - Active Blocking Mode (Default).
+#           Kicks players whose IP risk score meets or exceeds risk-threshold.
+#
+# AUDIT   - Dry-Run / Passive Logging Mode.
+#           Logs threat detections to server console and dispatches Discord alerts,
+#           but NEVER blocks or kicks any players. Useful for network evaluation.
+# ------------------------------------------------------------------------------
+mode: "ENFORCE"
+
+# Risk threshold (0 - 100).
+# Connections with risk_score >= threshold will trigger an alert (and kick if ENFORCE).
+# Commercial VPNs & Datacenters rate 85-100. Clean residential rates 0.
+risk-threshold: 80
+
+# Ignore gaming VPNs / network optimizers (ExitLag, WTFast, NoPing, Mudfish, GearUP)
+# Recommended true so legitimate competitive players optimizing ping are not blocked.
+allow-gaming-optimizers: true
+
+# In-memory IP cache duration in minutes
+# Prevents redundant API queries when players reconnect or hop between proxy subservers.
+cache-duration-minutes: 30
+
+# ------------------------------------------------------------------------------
+# Sentinel Gate™ - Intelligent Anti-Bot Burst Protection
+# Detects rapid join bursts from new, unverified IPs and temporarily closes
+# the gate against bot attacks. Real players and cached IPs pass freely.
+# ------------------------------------------------------------------------------
+anti-bot:
+  enabled: true
+  # Maximum new unverified connections per second before gate activates
+  burst-threshold: 5
+  # Duration in seconds to keep Sentinel Gate active during an attack
+  shield-duration-seconds: 15
+  # Duration in seconds to temporarily quarantine throttled bot IPs to prevent slow retries
+  quarantine-seconds: 60
+  # Kick message shown to bots throttled while Sentinel Gate is active
+  kick-message: "&c&lSentinel Gate\n&7Gate active due to abnormal connection velocity.\n&7Please reconnect in a few seconds."
+
+# ------------------------------------------------------------------------------
+# Discord Webhook Telemetry
+# Dispatches real-time security alerts directly to your Discord staff channel.
+# Features automatic burst aggregation to prevent Discord 429 rate limit drops.
+# ------------------------------------------------------------------------------
+discord:
+  enabled: true
+
+  # Paste your Discord Webhook URL below:
+  webhook-url: ""
+
+  # When true, only players detected as threats (VPN, Proxy, Tor, Swarm) trigger webhooks.
+  # When false, every connecting player's verdict is posted.
+  notify-only-on-threat: true
+
+  # Custom server / network name shown in the Discord alert footer
+  server-name: "Minecraft Network"
+
+# ------------------------------------------------------------------------------
+# Enforcement Kick Screen (Active when mode is set to ENFORCE)
+# Supports Minecraft color formatting with &
+# Placeholders: %player%, %ip%, %threat%, %risk%
+# ------------------------------------------------------------------------------
+enforcement:
+  kick-message: "&c&lSentinel Protection\n&7VPN / Proxy traffic is restricted on this server.\n&8Threat: &f%threat% &7| &8Risk: &f%risk%/100\n&7If you believe this is a false positive, please contact staff."

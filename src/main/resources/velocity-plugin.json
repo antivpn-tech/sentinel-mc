@@ -1,0 +1,10 @@
+{
+  "id": "sentinel",
+  "name": "Sentinel",
+  "version": "1.0.0",
+  "description": "Enterprise Anti-VPN, Proxy Evasion, and Sentinel Gate Protection for Velocity.",
+  "authors": [
+    "Sentinel"
+  ],
+  "main": "tech.antivpn.sentinel.velocity.SentinelVelocityPlugin"
+}

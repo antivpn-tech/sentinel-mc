@@ -1,0 +1,15 @@
+name: Sentinel
+version: 1.0.0
+main: tech.antivpn.sentinel.paper.SentinelPaperPlugin
+api-version: '1.13'
+author: Sentinel
+description: Enterprise Anti-VPN, Proxy Detection, and Sentinel Gate Anti-Bot Protection.
+commands:
+  sentinel:
+    description: Sentinel Anti-VPN administrative management command
+    permission: sentinel.admin
+    aliases: [antivpn]
+permissions:
+  sentinel.admin:
+    description: Allows administrative access to Sentinel commands and notifications
+    default: op
