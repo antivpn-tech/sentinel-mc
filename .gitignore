@@ -6,3 +6,20 @@ target/
 .DS_Store
 *.log
 .wrangler/
+
+# Agent and internal working documents
+brain/
+scratch/
+drafts/
+notes/
+AGENT.md
+agent.md
+AGENTS.md
+agents.md
+GEMINI.md
+gemini.md
+*.draft.md
+*.internal.md
+*.agent.md
+*_notes.md
+.env*
