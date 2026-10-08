@@ -5,7 +5,7 @@ package tech.antivpn.sentinel.common
  */
 data class SentinelConfig(
     val endpoint: String = "https://api.antivpn.tech/v1/check",
-    val licenseKey: String = "stl_test_showcase_demo",
+    val licenseKey: String = "stl_live_your_api_key_here",
     val timeoutMs: Int = 2500,
     val mode: String = "ENFORCE",
     val riskThreshold: Int = 80,

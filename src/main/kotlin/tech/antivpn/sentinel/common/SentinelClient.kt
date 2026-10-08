@@ -26,6 +26,7 @@ class SentinelClient(
         .build()
 
     private val cache = ConcurrentHashMap<String, CacheEntry>()
+    private var hasWarnedUnconfiguredKey = false
 
     private data class CacheEntry(
         val verdict: SentinelVerdict,
@@ -46,6 +47,15 @@ class SentinelClient(
 
         val normalizedIp = ip.trim()
 
+        // Guard unconfigured / placeholder license keys
+        if (config.licenseKey.isBlank() || config.licenseKey == "stl_live_your_api_key_here" || config.licenseKey == "stl_test_showcase_demo") {
+            if (!hasWarnedUnconfiguredKey) {
+                hasWarnedUnconfiguredKey = true
+                errorLogger("[Sentinel] ⚠️ Protection paused (failing open): No active license key configured in config.yml. Claim your key at https://antivpn.tech")
+            }
+            return CompletableFuture.completedFuture(SentinelVerdict.fallbackAllow(normalizedIp))
+        }
+
         // 1. Check in-memory cache
         val cached = cache[normalizedIp]
         if (cached != null && cached.isValid) {
@@ -63,6 +73,8 @@ class SentinelClient(
                 .timeout(Duration.ofMillis(config.timeoutMs.toLong()))
                 .header("User-Agent", "Sentinel-Minecraft/1.0.0")
                 .header("Accept", "application/json")
+                .header("Authorization", "Bearer ${config.licenseKey}")
+                .header("X-Sentinel-Key", config.licenseKey)
                 .GET()
                 .build()
 

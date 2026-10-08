@@ -7,9 +7,9 @@ api:
   # Sentinel Edge Intelligence API endpoint
   endpoint: "https://api.antivpn.tech/v1/check"
 
-  # Your Sentinel License Key (Claim yours at https://antivpn.tech)
-  # Free developer & showcase keys: Claim on dashboard or use stl_test_showcase_demo
-  license-key: "stl_test_showcase_demo"
+  # Your Sentinel License Key (Claim your free Developer key at https://antivpn.tech)
+  # Required: Paste your production license key below to enable real-time protection.
+  license-key: "stl_live_your_api_key_here"
 
   # HTTP connection timeout in milliseconds (2500ms recommended to avoid fail-open under lag)
   timeout-ms: 2500

@@ -69,7 +69,7 @@ class SentinelPaperPlugin : JavaPlugin(), CommandExecutor, TabCompleter {
 
         this.sentinelConfig = SentinelConfig(
             endpoint = c.getString("api.endpoint", "https://api.antivpn.tech/v1/check") ?: "https://api.antivpn.tech/v1/check",
-            licenseKey = c.getString("api.license-key", "stl_test_showcase_demo") ?: "stl_test_showcase_demo",
+            licenseKey = c.getString("api.license-key", "stl_live_your_api_key_here") ?: "stl_live_your_api_key_here",
             timeoutMs = c.getInt("api.timeout-ms", 2500),
             mode = c.getString("mode", "ENFORCE") ?: "ENFORCE",
             riskThreshold = c.getInt("risk-threshold", 80),

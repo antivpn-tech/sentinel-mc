@@ -120,7 +120,7 @@ class SentinelVelocityPlugin @Inject constructor(
             }
 
             val endpoint = props["api.endpoint"] ?: "https://api.antivpn.tech/v1/check"
-            val licenseKey = props["api.license-key"] ?: "stl_test_showcase_demo"
+            val licenseKey = props["api.license-key"] ?: "stl_live_your_api_key_here"
             val timeoutMs = props["api.timeout-ms"]?.toIntOrNull() ?: 2500
             val mode = props["mode"] ?: "ENFORCE"
             val riskThreshold = props["risk-threshold"]?.toIntOrNull() ?: 80

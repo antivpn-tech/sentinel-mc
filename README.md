@@ -64,9 +64,6 @@ To connect to the Sentinel intelligence network:
 2. Generate an API license key from the dashboard (Developer, Starter, or Enterprise).
 3. Insert your license key (`stl_live_...`) into `plugins/Sentinel/config.yml`.
 
-> [!NOTE]
-> A public sandbox testing key (`stl_test_showcase_demo`) is included in the default configuration for evaluation environments.
-
 ---
 
 ## Installation
@@ -94,8 +91,8 @@ api:
   # Sentinel Edge Intelligence API endpoint
   endpoint: "https://api.antivpn.tech/v1/check"
 
-  # Your Sentinel License Key (Claim at https://antivpn.tech)
-  license-key: "stl_test_showcase_demo"
+  # Your Sentinel License Key (Claim your free Developer key at https://antivpn.tech)
+  license-key: "stl_live_your_api_key_here"
 
   # HTTP connection timeout in milliseconds
   timeout-ms: 2500
