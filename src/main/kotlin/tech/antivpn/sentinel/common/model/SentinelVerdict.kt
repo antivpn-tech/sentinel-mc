@@ -7,6 +7,7 @@ data class SentinelVerdict(
     val ip: String = "unknown",
     val action: String = "ALLOW",
     val riskScore: Int = 0,
+    val confidence: Double = 0.0,
     val threatType: String = "Clean Residential",
     val isVpn: Boolean = false,
     val isGamingOptimizer: Boolean = false,
@@ -15,6 +16,7 @@ data class SentinelVerdict(
     val country: String = "ZZ",
     val city: String? = null,
     val region: String? = null,
+    val reasonCodes: List<String> = emptyList(),
     val reasons: List<String> = emptyList(),
     val durationMs: Long = 0
 ) {
@@ -27,6 +29,36 @@ data class SentinelVerdict(
             return false
         }
         return action.equals("BLOCK", ignoreCase = true) || riskScore >= threshold || isVpn
+    }
+
+    /**
+     * Identifies deterministic hard threats (Commercial VPNs, Datacenter VPS, Tor Exit Nodes,
+     * or high-confidence explicit blocks) where an immediate hard kick is statistically safe.
+     */
+    fun isHardThreat(threshold: Int = 80, allowGamingOptimizers: Boolean = true): Boolean {
+        if (allowGamingOptimizers && isGamingOptimizer) {
+            return false
+        }
+        if (action.equals("BLOCK", ignoreCase = true)) {
+            return true
+        }
+        if (reasonCodes.contains("CARRIER_COMMERCIAL_VPN") ||
+            reasonCodes.contains("HOSTING_INFRASTRUCTURE_MATCH") ||
+            reasonCodes.contains("TOR_EXIT_NODE")) {
+            return true
+        }
+        // High confidence threshold check
+        return isVpn && riskScore >= threshold && (confidence >= 0.85 || confidence == 0.0)
+    }
+
+    /**
+     * Identifies probabilistic dynamic residential proxies or covert tunnel anomalies
+     * where graduated defense (alerting, 2FA, rate limits) is recommended to prevent
+     * false positive kicks against legitimate players.
+     */
+    fun isSuspectResidentialTunnel(): Boolean {
+        return reasonCodes.contains("RESIDENTIAL_TUNNEL_PROXY") ||
+               (threatType.contains("Residential", ignoreCase = true) && riskScore >= 65)
     }
 
     /**
@@ -47,6 +79,7 @@ data class SentinelVerdict(
                 ip = ip,
                 action = "ALLOW",
                 riskScore = 0,
+                confidence = 0.0,
                 threatType = "Clean (Fallback)",
                 isVpn = false,
                 isGamingOptimizer = false,
@@ -55,6 +88,7 @@ data class SentinelVerdict(
                 country = "ZZ",
                 city = null,
                 region = null,
+                reasonCodes = listOf("EDGE_API_TIMEOUT_FAIL_OPEN"),
                 reasons = listOf("Edge API timeout or connection failure (fail-open allow)"),
                 durationMs = 0
             )

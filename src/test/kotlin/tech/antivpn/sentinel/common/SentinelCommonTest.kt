@@ -24,34 +24,60 @@ class SentinelCommonTest {
             ip = "1.1.1.1",
             action = "BLOCK",
             riskScore = 95,
-            threatType = "Proxy/VPN",
+            confidence = 0.98,
+            threatType = "Commercial VPN",
+            reasonCodes = listOf("CARRIER_COMMERCIAL_VPN", "HOSTING_INFRASTRUCTURE_MATCH"),
             isVpn = true,
             isGamingOptimizer = false
         )
         assertTrue(vpnVerdict.isThreat(threshold = 80, allowGamingOptimizers = true))
+        assertTrue(vpnVerdict.isHardThreat(threshold = 80, allowGamingOptimizers = true))
+        assertFalse(vpnVerdict.isSuspectResidentialTunnel())
+
+        val residentialVerdict = SentinelVerdict(
+            ip = "185.1.2.3",
+            action = "ALLOW",
+            riskScore = 75,
+            confidence = 0.82,
+            threatType = "Residential Proxy",
+            reasonCodes = listOf("RESIDENTIAL_TUNNEL_PROXY"),
+            isVpn = false,
+            isGamingOptimizer = false
+        )
+        assertTrue(residentialVerdict.isSuspectResidentialTunnel())
+        // In default enforce mode, suspect residential proxy is not a hard threat (graduated defense applies)
+        assertFalse(residentialVerdict.isHardThreat(threshold = 80, allowGamingOptimizers = true))
 
         val gamingVerdict = SentinelVerdict(
             ip = "2.2.2.2",
             action = "BLOCK",
             riskScore = 90,
+            confidence = 0.95,
             threatType = "Gaming Optimizer",
+            reasonCodes = listOf("GAMING_OPTIMIZER_ROUTE"),
             isVpn = true,
             isGamingOptimizer = true
         )
         // Gaming optimizer should be allowed when allowGamingOptimizers is true
         assertFalse(gamingVerdict.isThreat(threshold = 80, allowGamingOptimizers = true))
+        assertFalse(gamingVerdict.isHardThreat(threshold = 80, allowGamingOptimizers = true))
         // And blocked when allowGamingOptimizers is false
         assertTrue(gamingVerdict.isThreat(threshold = 80, allowGamingOptimizers = false))
+        assertTrue(gamingVerdict.isHardThreat(threshold = 80, allowGamingOptimizers = false))
 
         val cleanVerdict = SentinelVerdict(
             ip = "3.3.3.3",
             action = "ALLOW",
             riskScore = 0,
+            confidence = 0.99,
             threatType = "Clean Residential",
+            reasonCodes = listOf("CARRIER_RESIDENTIAL_CLEAN"),
             isVpn = false,
             isGamingOptimizer = false
         )
         assertFalse(cleanVerdict.isThreat(threshold = 80, allowGamingOptimizers = true))
+        assertFalse(cleanVerdict.isHardThreat(threshold = 80, allowGamingOptimizers = true))
+        assertFalse(cleanVerdict.isSuspectResidentialTunnel())
     }
 
     @Test

@@ -65,8 +65,7 @@ class SentinelClient(
         // 2. Query Sentinel Edge API
         return try {
             val encodedIp = URLEncoder.encode(normalizedIp, StandardCharsets.UTF_8)
-            val encodedKey = URLEncoder.encode(config.licenseKey, StandardCharsets.UTF_8)
-            val url = "${config.endpoint}?ip=$encodedIp&key=$encodedKey"
+            val url = "${config.endpoint}?ip=$encodedIp"
 
             val request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
@@ -106,6 +105,7 @@ class SentinelClient(
 
             val action = if (root.has("action") && !root.get("action").isJsonNull) root.get("action").asString else "ALLOW"
             val riskScore = if (root.has("risk_score") && !root.get("risk_score").isJsonNull) root.get("risk_score").asInt else 0
+            val confidence = if (root.has("confidence") && !root.get("confidence").isJsonNull) root.get("confidence").asDouble else 0.0
             val threatType = if (root.has("threat_type") && !root.get("threat_type").isJsonNull) root.get("threat_type").asString else "Clean Residential"
             val isVpn = root.has("is_vpn") && !root.get("is_vpn").isJsonNull && root.get("is_vpn").asBoolean
             val isGamingOptimizer = root.has("is_gaming_optimizer") && !root.get("is_gaming_optimizer").isJsonNull && root.get("is_gaming_optimizer").asBoolean
@@ -116,12 +116,19 @@ class SentinelClient(
             val region = if (root.has("region") && !root.get("region").isJsonNull) root.get("region").asString else null
             val durationMs = if (root.has("duration_ms") && !root.get("duration_ms").isJsonNull) root.get("duration_ms").asLong else 0L
 
-            val reasons = mutableListOf<String>()
-            if (root.has("reasons") && root.get("reasons").isJsonArray) {
+            val reasonCodes = mutableListOf<String>()
+            if (root.has("reason_codes") && root.get("reason_codes").isJsonArray) {
+                val array = root.getAsJsonArray("reason_codes")
+                for (elem in array) {
+                    if (!elem.isJsonNull) {
+                        reasonCodes.add(elem.asString)
+                    }
+                }
+            } else if (root.has("reasons") && root.get("reasons").isJsonArray) {
                 val array = root.getAsJsonArray("reasons")
                 for (elem in array) {
                     if (!elem.isJsonNull) {
-                        reasons.add(elem.asString)
+                        reasonCodes.add(elem.asString)
                     }
                 }
             }
@@ -130,6 +137,7 @@ class SentinelClient(
                 ip = ip,
                 action = action,
                 riskScore = riskScore,
+                confidence = confidence,
                 threatType = threatType,
                 isVpn = isVpn,
                 isGamingOptimizer = isGamingOptimizer,
@@ -138,7 +146,8 @@ class SentinelClient(
                 country = country,
                 city = city,
                 region = region,
-                reasons = reasons,
+                reasonCodes = reasonCodes,
+                reasons = reasonCodes,
                 durationMs = durationMs
             )
         } catch (e: Exception) {
