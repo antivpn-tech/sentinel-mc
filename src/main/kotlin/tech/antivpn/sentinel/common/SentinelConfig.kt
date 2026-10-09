@@ -10,6 +10,7 @@ data class SentinelConfig(
     val mode: String = "ENFORCE",
     val riskThreshold: Int = 80,
     val allowGamingOptimizers: Boolean = true,
+    val graduatedDefense: Boolean = true,
     val cacheDurationMinutes: Int = 30,
     val discordEnabled: Boolean = true,
     val discordWebhookUrl: String = "",

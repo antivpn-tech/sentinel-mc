@@ -63,9 +63,23 @@ class SentinelVelocityPlugin @Inject constructor(
         logger.info(" Sentinel Anti-VPN Connector v1.0.0 (Velocity)")
         logger.info(" Mode: {} {}", sentinelConfig.mode, if (sentinelConfig.isAuditMode) "(AUDIT - PASSIVE MONITORING)" else "(ACTIVE ENFORCEMENT - BLOCKING VPNS)")
         logger.info(" Risk Threshold: {} / 100", sentinelConfig.riskThreshold)
+        logger.info(" Graduated Defense: {}", if (sentinelConfig.graduatedDefense) "ENABLED (Soft-alert suspect residential)" else "DISABLED")
         logger.info(" Sentinel Gate: {}", if (sentinelConfig.antiBotEnabled) "ENABLED (Burst: ${sentinelConfig.antiBotBurstThreshold} conn/s)" else "DISABLED")
         logger.info(" Discord Alerts: {}", if (sentinelConfig.isDiscordConfigured) "ENABLED (Rate-Limit Batcher)" else "DISABLED")
         logger.info("==================================================")
+
+        if (sentinelConfig.licenseKey == "stl_live_your_api_key_here" || sentinelConfig.licenseKey == "stl_test_showcase_demo" || sentinelConfig.licenseKey.isBlank()) {
+            logger.warn("*************************************************************************")
+            if (sentinelConfig.licenseKey == "stl_test_showcase_demo") {
+                logger.warn("[Sentinel] WARNING: Public demo sandbox key (stl_test_showcase_demo) in use!")
+                logger.warn("[Sentinel] Demo keys are strictly rate-limited (50 req/day) across all servers.")
+            } else {
+                logger.warn("[Sentinel] WARNING: No production Sentinel API license key configured!")
+            }
+            logger.warn("[Sentinel] Running in {} mode without a production license key.", sentinelConfig.mode)
+            logger.warn("[Sentinel] Requests exceeding limits will fail-open. Configure your key in config.yml.")
+            logger.warn("*************************************************************************")
+        }
     }
 
     @Subscribe
@@ -125,6 +139,7 @@ class SentinelVelocityPlugin @Inject constructor(
             val mode = props["mode"] ?: "ENFORCE"
             val riskThreshold = props["risk-threshold"]?.toIntOrNull() ?: 80
             val allowGaming = props["allow-gaming-optimizers"]?.toBooleanStrictOrNull() ?: true
+            val graduatedDefense = props["graduated-defense"]?.toBooleanStrictOrNull() ?: true
             val cacheMinutes = props["cache-duration-minutes"]?.toIntOrNull() ?: 30
             val discordEnabled = props["discord.enabled"]?.toBooleanStrictOrNull() ?: true
             val webhookUrl = props["discord.webhook-url"] ?: ""
@@ -146,6 +161,7 @@ class SentinelVelocityPlugin @Inject constructor(
                 mode = mode,
                 riskThreshold = riskThreshold,
                 allowGamingOptimizers = allowGaming,
+                graduatedDefense = graduatedDefense,
                 cacheDurationMinutes = cacheMinutes,
                 discordEnabled = discordEnabled,
                 discordWebhookUrl = webhookUrl,

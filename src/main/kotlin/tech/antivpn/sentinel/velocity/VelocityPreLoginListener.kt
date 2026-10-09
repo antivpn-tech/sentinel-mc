@@ -56,29 +56,41 @@ class VelocityPreLoginListener(private val plugin: SentinelVelocityPlugin) {
                 if (isThreat || !config.discordNotifyOnlyOnThreat) {
                     val enforce = !config.isAuditMode
 
-                    // Dispatch Discord alert
-                    plugin.webhookNotifier.sendAlert(username, verdict, enforce)
+                    if (enforce && isThreat) {
+                        val isSuspectResidential = verdict.isSuspectResidentialTunnel()
+                        if (config.graduatedDefense && isSuspectResidential && !verdict.isHardThreat(config.riskThreshold, config.allowGamingOptimizers)) {
+                            // Graduated Defense: Allow connection to protect legitimate players on shared mobile CGNAT pools, but alert staff
+                            plugin.webhookNotifier.sendAlert(username, verdict, false)
+                            plugin.logger.warn(
+                                "[Sentinel] GRADUATED DEFENSE: Flagged {} ({}) - Suspect Residential Tunnel [Risk: {}/100, Confidence: {}]. Connection allowed; alert dispatched.",
+                                username, ip, verdict.riskScore, verdict.confidence
+                            )
+                        } else {
+                            // Deterministic hard threat: Enforce kick
+                            plugin.webhookNotifier.sendAlert(username, verdict, true)
+                            val kickComponent = Component.text()
+                                .append(Component.text("Sentinel Protection\n", NamedTextColor.RED))
+                                .append(Component.text("VPN / Proxy traffic is restricted on this network.\n", NamedTextColor.GRAY))
+                                .append(Component.text("Threat: ", NamedTextColor.DARK_GRAY))
+                                .append(Component.text("${verdict.threatType} | ", NamedTextColor.WHITE))
+                                .append(Component.text("Risk: ", NamedTextColor.DARK_GRAY))
+                                .append(Component.text("${verdict.riskScore}/100", NamedTextColor.WHITE))
+                                .build()
 
-                    if (enforce) {
-                        val kickComponent = Component.text()
-                            .append(Component.text("Sentinel Protection\n", NamedTextColor.RED))
-                            .append(Component.text("VPN / Proxy traffic is restricted on this network.\n", NamedTextColor.GRAY))
-                            .append(Component.text("Threat: ", NamedTextColor.DARK_GRAY))
-                            .append(Component.text("${verdict.threatType} | ", NamedTextColor.WHITE))
-                            .append(Component.text("Risk: ", NamedTextColor.DARK_GRAY))
-                            .append(Component.text("${verdict.riskScore}/100", NamedTextColor.WHITE))
-                            .build()
-
-                        event.result = PreLoginEvent.PreLoginComponentResult.denied(kickComponent)
-                        plugin.logger.warn(
-                            "[Sentinel] ENFORCE: Blocked {} ({}) - Threat: {} [Risk: {}/100]",
-                            username, ip, verdict.threatType, verdict.riskScore
-                        )
+                            event.result = PreLoginEvent.PreLoginComponentResult.denied(kickComponent)
+                            plugin.logger.warn(
+                                "[Sentinel] ENFORCE: Blocked {} ({}) - Threat: {} [Risk: {}/100]",
+                                username, ip, verdict.threatType, verdict.riskScore
+                            )
+                        }
                     } else {
-                        plugin.logger.info(
-                            "[Sentinel] AUDIT: Flagged {} ({}) - Threat: {} [Risk: {}/100] (Player Allowed - Audit Mode)",
-                            username, ip, verdict.threatType, verdict.riskScore
-                        )
+                        plugin.webhookNotifier.sendAlert(username, verdict, false)
+                        if (isThreat) {
+                            plugin.logger.info(
+                                "[Sentinel] AUDIT: Flagged {} ({}) - Threat: {} [Risk: {}/100] (Player Allowed - Audit Mode)",
+                                username, ip, verdict.threatType, verdict.riskScore
+                            )
+                        }
                     }
                 }
             } catch (e: Exception) {

@@ -36,6 +36,9 @@ class SentinelClient(
             get() = System.currentTimeMillis() < expiresAt
     }
 
+    @Volatile
+    private var backoffUntil: Long = 0
+
     /**
      * Evaluates an IP address asynchronously.
      * Guaranteed fail-open: On timeout or network failure, returns an ALLOW verdict.
@@ -56,10 +59,17 @@ class SentinelClient(
             return CompletableFuture.completedFuture(SentinelVerdict.fallbackAllow(normalizedIp))
         }
 
-        // 1. Check in-memory cache
-        val cached = cache[normalizedIp]
+        // 1. Check in-memory cache (checks direct IP and IPv6 /64 prefix to prevent rotation attacks)
+        val subnetKey = getSubnetKey(normalizedIp)
+        val cached = cache[normalizedIp] ?: cache[subnetKey]
         if (cached != null && cached.isValid) {
             return CompletableFuture.completedFuture(cached.verdict)
+        }
+
+        // Check if currently under HTTP 429 rate limit backoff
+        val now = System.currentTimeMillis()
+        if (now < backoffUntil) {
+            return CompletableFuture.completedFuture(SentinelVerdict.fallbackAllow(normalizedIp))
         }
 
         // 2. Query Sentinel Edge API
@@ -79,13 +89,37 @@ class SentinelClient(
 
             httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
                 .thenApply { response ->
-                    if (response.statusCode() == 200) {
+                    val status = response.statusCode()
+
+                    // Monitor Quota Remaining Header
+                    val quotaRemainingOpt = response.headers().firstValue("X-Sentinel-Quota-Remaining")
+                    if (quotaRemainingOpt.isPresent) {
+                        val remaining = quotaRemainingOpt.get().toLongOrNull()
+                        if (remaining != null && remaining in 1..499) {
+                            errorLogger("[Sentinel] ⚠️ Monthly license quota running low: Only $remaining checks remaining in active billing cycle!")
+                        }
+                    }
+
+                    if (status == 200) {
                         val verdict = parseVerdict(normalizedIp, response.body())
                         val ttlMs = config.cacheDurationMinutes.toLong() * 60 * 1000
-                        cache[normalizedIp] = CacheEntry(verdict, System.currentTimeMillis() + ttlMs)
+                        val expiry = System.currentTimeMillis() + ttlMs
+
+                        cache[normalizedIp] = CacheEntry(verdict, expiry)
+                        if (normalizedIp.contains(":")) {
+                            cache[subnetKey] = CacheEntry(verdict, expiry)
+                        }
                         verdict
+                    } else if (status == 429) {
+                        val retryAfter = response.headers().firstValue("Retry-After").orElse("5").toLongOrNull() ?: 5L
+                        backoffUntil = System.currentTimeMillis() + (retryAfter * 1000)
+                        errorLogger("[Sentinel] ⚠️ Rate limit exceeded (HTTP 429). Backing off edge queries for ${retryAfter}s: ${response.body()}")
+                        SentinelVerdict.fallbackAllow(normalizedIp)
+                    } else if (status == 403) {
+                        errorLogger("[Sentinel] 🚨 Edge API returned HTTP 403 (Quota Depleted or Forbidden): ${response.body()}. Failing open.")
+                        SentinelVerdict.fallbackAllow(normalizedIp)
                     } else {
-                        errorLogger("[Sentinel] Edge API returned HTTP ${response.statusCode()} for $normalizedIp: ${response.body()}")
+                        errorLogger("[Sentinel] Edge API returned HTTP $status for $normalizedIp: ${response.body()}")
                         SentinelVerdict.fallbackAllow(normalizedIp)
                     }
                 }
@@ -99,22 +133,40 @@ class SentinelClient(
         }
     }
 
+    /**
+     * Canonicalizes IPv6 addresses to their /64 subnet prefix to prevent
+     * rotating IPv6 bot swarm attacks from depleting license quota.
+     */
+    fun getSubnetKey(ip: String): String {
+        if (!ip.contains(":")) return ip
+        val parts = ip.split(":")
+        if (parts.size >= 4) {
+            return "${parts[0]}:${parts[1]}:${parts[2]}:${parts[3]}::/64"
+        }
+        return ip
+    }
+
     private fun parseVerdict(ip: String, jsonBody: String): SentinelVerdict {
         return try {
             val root = JsonParser.parseString(jsonBody).asJsonObject
 
             val action = if (root.has("action") && !root.get("action").isJsonNull) root.get("action").asString else "ALLOW"
             val riskScore = if (root.has("risk_score") && !root.get("risk_score").isJsonNull) root.get("risk_score").asInt else 0
-            val confidence = if (root.has("confidence") && !root.get("confidence").isJsonNull) root.get("confidence").asDouble else 0.0
+            val confidence = if (root.has("confidence") && !root.get("confidence").isJsonNull) root.get("confidence").asDouble else (if (action == "ALLOW") 0.99 else 0.90)
             val threatType = if (root.has("threat_type") && !root.get("threat_type").isJsonNull) root.get("threat_type").asString else "Clean Residential"
             val isVpn = root.has("is_vpn") && !root.get("is_vpn").isJsonNull && root.get("is_vpn").asBoolean
             val isGamingOptimizer = root.has("is_gaming_optimizer") && !root.get("is_gaming_optimizer").isJsonNull && root.get("is_gaming_optimizer").asBoolean
             val asn = if (root.has("asn") && !root.get("asn").isJsonNull) root.get("asn").asLong else 0L
             val provider = if (root.has("provider") && !root.get("provider").isJsonNull) root.get("provider").asString else "Unknown Provider"
+            val hostname = if (root.has("hostname") && !root.get("hostname").isJsonNull) root.get("hostname").asString else null
             val country = if (root.has("country") && !root.get("country").isJsonNull) root.get("country").asString else "ZZ"
             val city = if (root.has("city") && !root.get("city").isJsonNull) root.get("city").asString else null
             val region = if (root.has("region") && !root.get("region").isJsonNull) root.get("region").asString else null
-            val durationMs = if (root.has("duration_ms") && !root.get("duration_ms").isJsonNull) root.get("duration_ms").asLong else 0L
+            val durationMs = when {
+                root.has("execution_time_ms") && !root.get("execution_time_ms").isJsonNull -> root.get("execution_time_ms").asLong
+                root.has("duration_ms") && !root.get("duration_ms").isJsonNull -> root.get("duration_ms").asLong
+                else -> 0L
+            }
 
             val reasonCodes = mutableListOf<String>()
             if (root.has("reason_codes") && root.get("reason_codes").isJsonArray) {
@@ -143,6 +195,7 @@ class SentinelClient(
                 isGamingOptimizer = isGamingOptimizer,
                 asn = asn,
                 provider = provider,
+                hostname = hostname,
                 country = country,
                 city = city,
                 region = region,

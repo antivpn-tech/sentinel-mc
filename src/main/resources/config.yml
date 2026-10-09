@@ -34,6 +34,14 @@ risk-threshold: 80
 # Recommended true so legitimate competitive players optimizing ping are not blocked.
 allow-gaming-optimizers: true
 
+# Graduated Defense Policy (Recommended: true)
+# When true, deterministic threats (Commercial VPN, Datacenter VPS, Tor Exit Nodes)
+# are immediately kicked in ENFORCE mode. Probabilistic residential proxies and
+# covert tunnels trigger a staff warning and Discord alert without kicking the player,
+# protecting legitimate players sharing carrier or mobile CGNAT IP pools.
+# If set to false, all threats meeting risk-threshold are kicked regardless of type.
+graduated-defense: true
+
 # In-memory IP cache duration in minutes
 # Prevents redundant API queries when players reconnect or hop between proxy subservers.
 cache-duration-minutes: 30

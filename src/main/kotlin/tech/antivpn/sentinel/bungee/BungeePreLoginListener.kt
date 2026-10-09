@@ -55,27 +55,38 @@ class BungeePreLoginListener(private val plugin: SentinelBungeePlugin) : Listene
                 if (isThreat || !config.discordNotifyOnlyOnThreat) {
                     val enforce = !config.isAuditMode
 
-                    // Dispatch Discord alert
-                    plugin.webhookNotifier.sendAlert(playerName, verdict, enforce)
-
-                    if (enforce) {
-                        val kickMessage = ChatColor.translateAlternateColorCodes(
-                            '&',
-                            config.kickMessage
-                                .replace("%threat%", verdict.threatType)
-                                .replace("%risk%", verdict.riskScore.toString())
-                                .replace("%ip%", ip)
-                                .replace("%player%", playerName)
-                        )
-                        event.isCancelled = true
-                        event.setCancelReason(*TextComponent.fromLegacyText(kickMessage))
-                        plugin.logger.warning(
-                            "[Sentinel] ENFORCE: Blocked $playerName ($ip) - Threat: ${verdict.threatType} [Risk: ${verdict.riskScore}/100]"
-                        )
+                    if (enforce && isThreat) {
+                        val isSuspectResidential = verdict.isSuspectResidentialTunnel()
+                        if (config.graduatedDefense && isSuspectResidential && !verdict.isHardThreat(config.riskThreshold, config.allowGamingOptimizers)) {
+                            // Graduated Defense: Allow connection to protect legitimate players on shared mobile CGNAT pools, but alert staff
+                            plugin.webhookNotifier.sendAlert(playerName, verdict, false)
+                            plugin.logger.warning(
+                                "[Sentinel] GRADUATED DEFENSE: Flagged $playerName ($ip) - Suspect Residential Tunnel [Risk: ${verdict.riskScore}/100, Confidence: ${verdict.confidence}]. Connection allowed; alert dispatched."
+                            )
+                        } else {
+                            // Deterministic hard threat: Enforce kick
+                            plugin.webhookNotifier.sendAlert(playerName, verdict, true)
+                            val kickMessage = ChatColor.translateAlternateColorCodes(
+                                '&',
+                                config.kickMessage
+                                    .replace("%threat%", verdict.threatType)
+                                    .replace("%risk%", verdict.riskScore.toString())
+                                    .replace("%ip%", ip)
+                                    .replace("%player%", playerName)
+                            )
+                            event.isCancelled = true
+                            event.setCancelReason(*TextComponent.fromLegacyText(kickMessage))
+                            plugin.logger.warning(
+                                "[Sentinel] ENFORCE: Blocked $playerName ($ip) - Threat: ${verdict.threatType} [Risk: ${verdict.riskScore}/100]"
+                            )
+                        }
                     } else {
-                        plugin.logger.info(
-                            "[Sentinel] AUDIT: Flagged $playerName ($ip) - Threat: ${verdict.threatType} [Risk: ${verdict.riskScore}/100] (Player Allowed - Audit Mode)"
-                        )
+                        plugin.webhookNotifier.sendAlert(playerName, verdict, false)
+                        if (isThreat) {
+                            plugin.logger.info(
+                                "[Sentinel] AUDIT: Flagged $playerName ($ip) - Threat: ${verdict.threatType} [Risk: ${verdict.riskScore}/100] (Player Allowed - Audit Mode)"
+                            )
+                        }
                     }
                 }
             } catch (e: Exception) {

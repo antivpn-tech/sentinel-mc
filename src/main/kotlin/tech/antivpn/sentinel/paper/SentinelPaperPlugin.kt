@@ -48,9 +48,23 @@ class SentinelPaperPlugin : JavaPlugin(), CommandExecutor, TabCompleter {
         logger.info(" Sentinel Anti-VPN Connector v${description.version} (Paper/Spigot)")
         logger.info(" Mode: ${sentinelConfig.mode} " + if (sentinelConfig.isAuditMode) "(AUDIT - PASSIVE MONITORING)" else "(ACTIVE ENFORCEMENT - BLOCKING VPNS)")
         logger.info(" Risk Threshold: ${sentinelConfig.riskThreshold} / 100")
+        logger.info(" Graduated Defense: " + if (sentinelConfig.graduatedDefense) "ENABLED (Soft-alert suspect residential)" else "DISABLED")
         logger.info(" Sentinel Gate: " + if (sentinelConfig.antiBotEnabled) "ENABLED (Burst: ${sentinelConfig.antiBotBurstThreshold} conn/s)" else "DISABLED")
         logger.info(" Discord Alerts: " + if (sentinelConfig.isDiscordConfigured) "ENABLED (Rate-Limit Batcher)" else "DISABLED")
         logger.info("==================================================")
+
+        if (sentinelConfig.licenseKey == "stl_live_your_api_key_here" || sentinelConfig.licenseKey == "stl_test_showcase_demo" || sentinelConfig.licenseKey.isBlank()) {
+            logger.warning("*************************************************************************")
+            if (sentinelConfig.licenseKey == "stl_test_showcase_demo") {
+                logger.warning("[Sentinel] WARNING: Public demo sandbox key (stl_test_showcase_demo) in use!")
+                logger.warning("[Sentinel] Demo keys are strictly rate-limited (50 req/day) across all servers.")
+            } else {
+                logger.warning("[Sentinel] WARNING: No production Sentinel API license key configured!")
+            }
+            logger.warning("[Sentinel] Running in ${sentinelConfig.mode} mode without a production license key.")
+            logger.warning("[Sentinel] Requests exceeding limits will fail-open. Configure your key in config.yml.")
+            logger.warning("*************************************************************************")
+        }
     }
 
     override fun onDisable() {
@@ -74,6 +88,7 @@ class SentinelPaperPlugin : JavaPlugin(), CommandExecutor, TabCompleter {
             mode = c.getString("mode", "ENFORCE") ?: "ENFORCE",
             riskThreshold = c.getInt("risk-threshold", 80),
             allowGamingOptimizers = c.getBoolean("allow-gaming-optimizers", true),
+            graduatedDefense = c.getBoolean("graduated-defense", true),
             cacheDurationMinutes = c.getInt("cache-duration-minutes", 30),
             discordEnabled = c.getBoolean("discord.enabled", true),
             discordWebhookUrl = c.getString("discord.webhook-url", "") ?: "",

@@ -125,4 +125,29 @@ class SentinelCommonTest {
         assertTrue(reloaded.isWhitelisted("notch", "1.2.3.4"))
         assertTrue(reloaded.isBlacklisted("badplayer", "9.9.9.9"))
     }
+
+    @Test
+    fun testIPv6SubnetGroupingAndQuarantine() {
+        val config = SentinelConfig(
+            antiBotEnabled = true,
+            antiBotBurstThreshold = 2,
+            antiBotShieldDurationSeconds = 5,
+            antiBotQuarantineSeconds = 10
+        )
+        val gate = SentinelGate(config)
+
+        val ip1 = "2001:db8:85a3:8d3:1319:8a2e:370:7348"
+        val ip2 = "2001:db8:85a3:8d3:ffff:eeee:dddd:cccc" // same /64
+        val ipDiff = "2001:db8:9999:111:1111:2222:3333:4444" // different /64
+
+        assertFalse(gate.shouldThrottle(ip1, isCached = false))
+        assertFalse(gate.shouldThrottle(ipDiff, isCached = false))
+        // 3rd connection triggers gate and quarantines the /64
+        assertTrue(gate.shouldThrottle(ip1, isCached = false))
+        assertTrue(gate.isQuarantined(ip1))
+        // Rotated IP in the same /64 prefix must also be quarantined!
+        assertTrue(gate.isQuarantined(ip2))
+        // Different subnet is not individually quarantined
+        assertFalse(gate.isQuarantined(ipDiff))
+    }
 }

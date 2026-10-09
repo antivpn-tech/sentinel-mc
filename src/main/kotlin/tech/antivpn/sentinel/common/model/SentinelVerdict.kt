@@ -13,6 +13,7 @@ data class SentinelVerdict(
     val isGamingOptimizer: Boolean = false,
     val asn: Long = 0,
     val provider: String = "Unknown Provider",
+    val hostname: String? = null,
     val country: String = "ZZ",
     val city: String? = null,
     val region: String? = null,
@@ -47,8 +48,12 @@ data class SentinelVerdict(
             reasonCodes.contains("TOR_EXIT_NODE")) {
             return true
         }
+        // Suspect residential tunnels require graduated defense, not immediate hard-block
+        if (isSuspectResidentialTunnel()) {
+            return false
+        }
         // High confidence threshold check
-        return isVpn && riskScore >= threshold && (confidence >= 0.85 || confidence == 0.0)
+        return isVpn && riskScore >= threshold && (confidence >= 0.90 || confidence == 0.0)
     }
 
     /**

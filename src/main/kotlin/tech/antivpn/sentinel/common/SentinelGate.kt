@@ -37,13 +37,15 @@ class SentinelGate(
         }
 
         val now = System.currentTimeMillis()
+        val targetKey = getSubnetKey(ip)
 
-        // 1. Check if IP is currently quarantined from a recent burst
-        val quarantinedUntil = quarantinedIps[ip]
+        // 1. Check if IP or its /64 subnet is currently quarantined from a recent burst
+        val quarantinedUntil = quarantinedIps[targetKey] ?: quarantinedIps[ip]
         if (quarantinedUntil != null) {
             if (now < quarantinedUntil) {
                 return true
             } else {
+                quarantinedIps.remove(targetKey)
                 quarantinedIps.remove(ip)
             }
         }
@@ -52,7 +54,7 @@ class SentinelGate(
 
         // 2. Check if Sentinel Gate is currently closed
         if (now < gateUntil) {
-            quarantine(ip, now)
+            quarantine(targetKey, now)
             return true
         }
 
@@ -68,11 +70,20 @@ class SentinelGate(
             val newGateUntil = now + (config.antiBotShieldDurationSeconds * 1000L)
             gateActiveUntil.set(newGateUntil)
             warnLogger("[Sentinel Gate] Abnormal join velocity detected (${connectionTimestamps.size} conn/sec)! Sentinel Gate active for ${config.antiBotShieldDurationSeconds}s.")
-            quarantine(ip, now)
+            quarantine(targetKey, now)
             return true
         }
 
         return false
+    }
+
+    private fun getSubnetKey(ip: String): String {
+        return if (ip.contains(':')) {
+            val parts = ip.split(':')
+            if (parts.size >= 4) parts.take(4).joinToString(":") + "::/64" else ip
+        } else {
+            ip
+        }
     }
 
     private fun quarantine(ip: String, now: Long) {
@@ -88,7 +99,8 @@ class SentinelGate(
     fun isGateActive(): Boolean = System.currentTimeMillis() < gateActiveUntil.get()
 
     fun isQuarantined(ip: String): Boolean {
-        val until = quarantinedIps[ip] ?: return false
+        val targetKey = getSubnetKey(ip)
+        val until = quarantinedIps[targetKey] ?: quarantinedIps[ip] ?: return false
         return System.currentTimeMillis() < until
     }
 
