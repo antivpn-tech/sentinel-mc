@@ -30,7 +30,7 @@ mode: "ENFORCE"
 # Commercial VPNs & Datacenters rate 85-100. Clean residential rates 0.
 risk-threshold: 80
 
-# Ignore gaming VPNs / network optimizers (ExitLag, WTFast, NoPing, Mudfish, GearUP)
+# Ignore gaming VPNs / network optimizers (ExitLag, WTFast, Cloudflare WARP, NoPing, Mudfish, GearUP)
 # Recommended true so legitimate competitive players optimizing ping are not blocked.
 allow-gaming-optimizers: true
 

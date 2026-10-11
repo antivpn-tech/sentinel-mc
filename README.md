@@ -10,7 +10,7 @@
 
 Sentinel Minecraft Connector is the official universal Kotlin connector linking Minecraft servers and proxy networks directly to the Sentinel Edge Intelligence Network ([antivpn.tech](https://antivpn.tech)).
 
-It provides low-latency proxy and VPN detection, routing preservation for gaming optimizers (ExitLag, WTFast, etc.), and Sentinel Gate anti-bot join velocity protection. Delivered as a single universal JAR for Velocity, BungeeCord, Waterfall, Folia, Paper, Purpur, Spigot, and Bukkit.
+It provides low-latency proxy and VPN detection, routing preservation for gaming optimizers and privacy relays (ExitLag, WTFast, Cloudflare WARP, etc.), and Sentinel Gate anti-bot join velocity protection. Delivered as a single universal JAR for Velocity, BungeeCord, Waterfall, Folia, Paper, Purpur, Spigot, and Bukkit.
 
 ---
 
@@ -19,7 +19,7 @@ It provides low-latency proxy and VPN detection, routing preservation for gaming
 - **Universal Drop-in Binary**: Single artifact automatically initializes on Velocity 3.3+, BungeeCord, Waterfall, Folia, and Paper / Purpur / Spigot 1.8 through 1.21+.
 - **Fail-Open Architecture**: Asynchronous non-blocking HTTP/2 queries. If the edge network or remote API is unreachable, queries resolve to `ALLOW` to prevent blocking legitimate players.
 - **Sentinel Gate Join Rate Limiting**: In-memory sliding-window join tracking throttles rapid connection floods from unverified IPs and enforces temporary quarantine cooldowns before thread pools can be saturated.
-- **Gaming Optimizer Bypass**: Preserves competitive players utilizing latency routing services (ExitLag, WTFast, NoPing, Mudfish, GearUP) from false positives.
+- **Gaming Optimizer Bypass**: Preserves competitive players utilizing latency routing services and privacy relays (ExitLag, WTFast, Cloudflare WARP, NoPing, Mudfish, GearUP) from false positives.
 - **Batched Discord Telemetry**: Rate-limit-aware webhook dispatcher consolidates attack waves into structured digest embeds, preventing HTTP 429 webhook drops during floods.
 - **In-Memory Cache**: High-throughput memory cache eliminates redundant API queries during player reconnects or proxy server switches.
 - **Local Lists**: Administrative `/sentinel` commands for in-game IP and username whitelisting and blacklisting.
@@ -107,7 +107,7 @@ mode: "ENFORCE"
 # Risk threshold (0 - 100). Commercial VPNs and proxies rate 85-100.
 risk-threshold: 80
 
-# Ignore gaming VPNs and ping optimizers (ExitLag, WTFast, NoPing, Mudfish, GearUP)
+# Ignore gaming VPNs, ping optimizers, and privacy relays (ExitLag, WTFast, Cloudflare WARP, NoPing, Mudfish, GearUP)
 allow-gaming-optimizers: true
 
 # In-memory IP cache duration in minutes
