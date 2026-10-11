@@ -3,20 +3,20 @@
 <p align="center">
   <a href="https://github.com/antivpn-tech/sentinel-mc/releases"><img src="https://img.shields.io/github/v/release/antivpn-tech/sentinel-mc?color=2563EB&label=Release" alt="Release"></a>
   <a href="https://kotlinlang.org"><img src="https://img.shields.io/badge/Language-Kotlin-7F52FF.svg" alt="Kotlin"></a>
-  <a href="https://papermc.io"><img src="https://img.shields.io/badge/Platform-Paper%20%7C%20Velocity%20%7C%20BungeeCord-EA580C.svg" alt="Platforms"></a>
+  <a href="https://papermc.io"><img src="https://img.shields.io/badge/Platform-Paper%20%7C%20Folia%20%7C%20Velocity%20%7C%20BungeeCord-EA580C.svg" alt="Platforms"></a>
   <a href="https://antivpn.tech"><img src="https://img.shields.io/badge/API-api.antivpn.tech-059669.svg" alt="Sentinel API"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-475569.svg" alt="License"></a>
 </p>
 
 Sentinel Minecraft Connector is the official universal Kotlin connector linking Minecraft servers and proxy networks directly to the Sentinel Edge Intelligence Network ([antivpn.tech](https://antivpn.tech)).
 
-It provides low-latency proxy and VPN detection, routing preservation for gaming optimizers (ExitLag, WTFast, etc.), and Sentinel Gate anti-bot join velocity protection. Delivered as a single universal JAR for Velocity, BungeeCord, Waterfall, Paper, Purpur, Spigot, and Bukkit.
+It provides low-latency proxy and VPN detection, routing preservation for gaming optimizers (ExitLag, WTFast, etc.), and Sentinel Gate anti-bot join velocity protection. Delivered as a single universal JAR for Velocity, BungeeCord, Waterfall, Folia, Paper, Purpur, Spigot, and Bukkit.
 
 ---
 
 ## Key Capabilities
 
-- **Universal Drop-in Binary**: Single artifact automatically initializes on Velocity 3.3+, BungeeCord, Waterfall, and Paper / Purpur / Spigot 1.8 through 1.21+.
+- **Universal Drop-in Binary**: Single artifact automatically initializes on Velocity 3.3+, BungeeCord, Waterfall, Folia, and Paper / Purpur / Spigot 1.8 through 1.21+.
 - **Fail-Open Architecture**: Asynchronous non-blocking HTTP/2 queries. If the edge network or remote API is unreachable, queries resolve to `ALLOW` to prevent blocking legitimate players.
 - **Sentinel Gate Join Rate Limiting**: In-memory sliding-window join tracking throttles rapid connection floods from unverified IPs and enforces temporary quarantine cooldowns before thread pools can be saturated.
 - **Gaming Optimizer Bypass**: Preserves competitive players utilizing latency routing services (ExitLag, WTFast, NoPing, Mudfish, GearUP) from false positives.

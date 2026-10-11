@@ -52,7 +52,7 @@ jobs:
             ### Supported Platforms
             - Velocity 3.3+
             - BungeeCord / Waterfall
-            - Paper / Purpur / Spigot / Bukkit 1.8 – 1.21+
+            - Paper / Purpur / Folia / Spigot / Bukkit 1.8 – 1.21+
 
             ### Key Capabilities
             - **Sentinel Gate**: In-memory join velocity limiter and anti-bot flood shield.

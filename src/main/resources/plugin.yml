@@ -2,6 +2,7 @@ name: Sentinel
 version: 1.1.0
 main: tech.antivpn.sentinel.paper.SentinelPaperPlugin
 api-version: '1.13'
+folia-supported: true
 author: Sentinel
 description: Enterprise Anti-VPN, Proxy Detection, and Sentinel Gate Anti-Bot Protection.
 commands:

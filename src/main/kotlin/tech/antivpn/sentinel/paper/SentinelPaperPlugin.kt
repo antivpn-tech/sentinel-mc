@@ -45,7 +45,7 @@ class SentinelPaperPlugin : JavaPlugin(), CommandExecutor, TabCompleter {
         }
 
         logger.info("==================================================")
-        logger.info(" Sentinel Anti-VPN Connector v${description.version} (Paper/Spigot)")
+        logger.info(" Sentinel Anti-VPN Connector v${description.version} (Paper/Folia/Spigot)")
         logger.info(" Mode: ${sentinelConfig.mode} " + if (sentinelConfig.isAuditMode) "(AUDIT - PASSIVE MONITORING)" else "(ACTIVE ENFORCEMENT - BLOCKING VPNS)")
         logger.info(" Risk Threshold: ${sentinelConfig.riskThreshold} / 100")
         logger.info(" Graduated Defense: " + if (sentinelConfig.graduatedDefense) "ENABLED (Soft-alert suspect residential)" else "DISABLED")
