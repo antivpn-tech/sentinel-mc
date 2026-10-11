@@ -50,14 +50,14 @@ class BungeePreLoginListener(private val plugin: SentinelBungeePlugin) : Listene
         plugin.proxy.scheduler.runAsync(plugin) {
             try {
                 val verdict = plugin.sentinelClient.evaluate(ip).join()
-                val isThreat = verdict.isThreat(config.riskThreshold, config.allowGamingOptimizers, config.allowPrivacyRelays)
+                val isThreat = verdict.isThreat(config.riskThreshold, config.allowGamingOptimizers)
 
                 if (isThreat || !config.discordNotifyOnlyOnThreat) {
                     val enforce = !config.isAuditMode
 
                     if (enforce && isThreat) {
                         val isSuspectResidential = verdict.isSuspectResidentialTunnel()
-                        if (config.graduatedDefense && isSuspectResidential && !verdict.isHardThreat(config.riskThreshold, config.allowGamingOptimizers, config.allowPrivacyRelays)) {
+                        if (config.graduatedDefense && isSuspectResidential && !verdict.isHardThreat(config.riskThreshold, config.allowGamingOptimizers)) {
                             // Graduated Defense: Allow connection to protect legitimate players on shared mobile CGNAT pools, but alert staff
                             plugin.webhookNotifier.sendAlert(playerName, verdict, false)
                             plugin.logger.warning(

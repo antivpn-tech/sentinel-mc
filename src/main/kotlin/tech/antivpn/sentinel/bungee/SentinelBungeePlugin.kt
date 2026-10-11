@@ -112,7 +112,6 @@ class SentinelBungeePlugin : Plugin() {
             val mode = props["mode"] ?: "ENFORCE"
             val riskThreshold = props["risk-threshold"]?.toIntOrNull() ?: 80
             val allowGaming = props["allow-gaming-optimizers"]?.toBooleanStrictOrNull() ?: true
-            val allowPrivacyRelays = props["allow-privacy-relays"]?.toBooleanStrictOrNull() ?: true
             val graduatedDefense = props["graduated-defense"]?.toBooleanStrictOrNull() ?: true
             val cacheMinutes = props["cache-duration-minutes"]?.toIntOrNull() ?: 30
             val discordEnabled = props["discord.enabled"]?.toBooleanStrictOrNull() ?: true
@@ -135,7 +134,6 @@ class SentinelBungeePlugin : Plugin() {
                 mode = mode,
                 riskThreshold = riskThreshold,
                 allowGamingOptimizers = allowGaming,
-                allowPrivacyRelays = allowPrivacyRelays,
                 graduatedDefense = graduatedDefense,
                 cacheDurationMinutes = cacheMinutes,
                 discordEnabled = discordEnabled,

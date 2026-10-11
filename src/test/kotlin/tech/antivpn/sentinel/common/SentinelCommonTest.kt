@@ -15,7 +15,6 @@ class SentinelCommonTest {
         assertFalse(config.isAuditMode)
         assertEquals(80, config.riskThreshold)
         assertTrue(config.allowGamingOptimizers)
-        assertTrue(config.allowPrivacyRelays)
         assertTrue(config.antiBotEnabled)
     }
 
@@ -90,13 +89,13 @@ class SentinelCommonTest {
             isVpn = false,
             isPrivacyRelay = true
         )
-        // Privacy relay should not be flagged as a threat or hard threat when allowPrivacyRelays is true
-        assertFalse(privacyRelayVerdict.isThreat(threshold = 30, allowGamingOptimizers = true, allowPrivacyRelays = true))
-        assertFalse(privacyRelayVerdict.isHardThreat(threshold = 30, allowGamingOptimizers = true, allowPrivacyRelays = true))
+        // Privacy relay (e.g. Cloudflare WARP) should not be flagged when allowGamingOptimizers is true
+        assertFalse(privacyRelayVerdict.isThreat(threshold = 30, allowGamingOptimizers = true))
+        assertFalse(privacyRelayVerdict.isHardThreat(threshold = 30, allowGamingOptimizers = true))
 
-        // Privacy relay should be flagged when allowPrivacyRelays is false
-        assertTrue(privacyRelayVerdict.isThreat(threshold = 30, allowGamingOptimizers = true, allowPrivacyRelays = false))
-        assertTrue(privacyRelayVerdict.isHardThreat(threshold = 30, allowGamingOptimizers = true, allowPrivacyRelays = false))
+        // Privacy relay should be flagged when allowGamingOptimizers is false
+        assertTrue(privacyRelayVerdict.isThreat(threshold = 30, allowGamingOptimizers = false))
+        assertTrue(privacyRelayVerdict.isHardThreat(threshold = 30, allowGamingOptimizers = false))
     }
 
     @Test
@@ -104,25 +103,26 @@ class SentinelCommonTest {
         val client = SentinelClient(SentinelConfig.createDefault())
         val json = """
             {
-                "ip": "17.0.0.1",
+                "ip": "104.28.1.1",
                 "action": "ALLOW",
                 "risk_score": 35,
                 "threat_type": "Privacy Relay",
                 "is_vpn": false,
                 "is_privacy_relay": true,
-                "asn": 20940,
-                "provider": "Apple Private Relay / Akamai",
+                "asn": 13335,
+                "provider": "Cloudflare WARP",
                 "reason_codes": ["PRIVACY_RELAY_VERIFIED"]
             }
         """.trimIndent()
 
-        val verdict = client.parseVerdict("17.0.0.1", json)
+        val verdict = client.parseVerdict("104.28.1.1", json)
         assertTrue(verdict.isPrivacyRelay)
         assertFalse(verdict.isVpn)
         assertEquals(35, verdict.riskScore)
         assertEquals("Privacy Relay", verdict.threatType)
-        assertFalse(verdict.isThreat(threshold = 30, allowGamingOptimizers = false, allowPrivacyRelays = true))
-        assertTrue(verdict.isThreat(threshold = 30, allowGamingOptimizers = false, allowPrivacyRelays = false))
+        assertEquals("Cloudflare WARP", verdict.provider)
+        assertFalse(verdict.isThreat(threshold = 30, allowGamingOptimizers = true))
+        assertTrue(verdict.isThreat(threshold = 30, allowGamingOptimizers = false))
     }
 
     @Test

@@ -57,9 +57,8 @@ jobs:
             ### Key Capabilities
             - **Sentinel Gate**: In-memory join velocity limiter and anti-bot flood shield.
             - **Active Blocking by Default**: Mode defaults to `ENFORCE` upon installation.
-            - **Privacy Relay Intelligence**: Verified legitimate privacy relays (e.g. Apple iCloud Private Relay, Cloudflare WARP) are recognized and granted immunity from server risk thresholds.
+            - **Gaming Optimizer & WARP Bypass**: Preserves Cloudflare WARP, ExitLag, WTFast, NoPing, Mudfish, GearUP, and ping routing software.
             - **Fail-Open Architecture**: Sub-5ms async queries; players are never disconnected during network drops.
-            - **Gaming Optimizer Bypass**: Preserves ExitLag, WTFast, and ping routing software.
             - **Rate-Limited Discord Telemetry**: Consolidated alert digest during high-volume bot raids.
             - **Zero Dependencies**: Kotlin standard library is fully shaded and isolated.
 

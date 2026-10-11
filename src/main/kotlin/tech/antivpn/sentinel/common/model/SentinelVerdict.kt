@@ -23,24 +23,19 @@ data class SentinelVerdict(
     val durationMs: Long = 0
 ) {
     /**
-     * Determines whether this connection is classified as a threat given the threshold,
-     * gaming optimizer whitelist, and privacy relay settings.
+     * Determines whether this connection is classified as a threat given the threshold
+     * and gaming optimizer whitelist settings.
+     * When allowGamingOptimizers is true, latency optimizers and privacy relays (e.g. Cloudflare WARP)
+     * are permitted.
      */
     fun isThreat(
         threshold: Int,
-        allowGamingOptimizers: Boolean = true,
-        allowPrivacyRelays: Boolean = true
+        allowGamingOptimizers: Boolean = true
     ): Boolean {
-        if (allowGamingOptimizers && isGamingOptimizer) {
+        if (allowGamingOptimizers && (isGamingOptimizer || (isPrivacyRelay && !isVpn))) {
             return false
         }
-        if (!allowGamingOptimizers && isGamingOptimizer) {
-            return true
-        }
-        if (allowPrivacyRelays && isPrivacyRelay && !isVpn) {
-            return false
-        }
-        if (!allowPrivacyRelays && isPrivacyRelay) {
+        if (!allowGamingOptimizers && (isGamingOptimizer || isPrivacyRelay)) {
             return true
         }
         return action.equals("BLOCK", ignoreCase = true) || riskScore >= threshold || isVpn
@@ -52,19 +47,12 @@ data class SentinelVerdict(
      */
     fun isHardThreat(
         threshold: Int = 80,
-        allowGamingOptimizers: Boolean = true,
-        allowPrivacyRelays: Boolean = true
+        allowGamingOptimizers: Boolean = true
     ): Boolean {
-        if (allowGamingOptimizers && isGamingOptimizer) {
+        if (allowGamingOptimizers && (isGamingOptimizer || (isPrivacyRelay && !isVpn))) {
             return false
         }
-        if (!allowGamingOptimizers && isGamingOptimizer) {
-            return true
-        }
-        if (allowPrivacyRelays && isPrivacyRelay && !isVpn) {
-            return false
-        }
-        if (!allowPrivacyRelays && isPrivacyRelay) {
+        if (!allowGamingOptimizers && (isGamingOptimizer || isPrivacyRelay)) {
             return true
         }
         if (action.equals("BLOCK", ignoreCase = true)) {

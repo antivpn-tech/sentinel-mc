@@ -10,7 +10,7 @@
 
 Sentinel Minecraft Connector is the official universal Kotlin connector linking Minecraft servers and proxy networks directly to the Sentinel Edge Intelligence Network ([antivpn.tech](https://antivpn.tech)).
 
-It provides low-latency proxy and VPN detection, routing preservation for gaming optimizers and privacy relays (ExitLag, WTFast, Cloudflare WARP, etc.), and Sentinel Gate anti-bot join velocity protection. Delivered as a single universal JAR for Velocity, BungeeCord, Waterfall, Folia, Paper, Purpur, Spigot, and Bukkit.
+It provides low-latency proxy and VPN detection, routing preservation for gaming optimizers (Cloudflare WARP, ExitLag, WTFast, etc.), and Sentinel Gate anti-bot join velocity protection. Delivered as a single universal JAR for Velocity, BungeeCord, Waterfall, Folia, Paper, Purpur, Spigot, and Bukkit.
 
 ---
 
@@ -19,8 +19,7 @@ It provides low-latency proxy and VPN detection, routing preservation for gaming
 - **Universal Drop-in Binary**: Single artifact automatically initializes on Velocity 3.3+, BungeeCord, Waterfall, Folia, and Paper / Purpur / Spigot 1.8 through 1.21+.
 - **Fail-Open Architecture**: Asynchronous non-blocking HTTP/2 queries. If the edge network or remote API is unreachable, queries resolve to `ALLOW` to prevent blocking legitimate players.
 - **Sentinel Gate Join Rate Limiting**: In-memory sliding-window join tracking throttles rapid connection floods from unverified IPs and enforces temporary quarantine cooldowns before thread pools can be saturated.
-- **Gaming Optimizer Preservation**: Preserves competitive players utilizing latency routing services (ExitLag, WTFast, NoPing, Mudfish, GearUP, LagoFast) without false positives.
-- **Privacy Relay Intelligence**: Accurately recognizes encrypted privacy networks (Cloudflare WARP, Apple iCloud Private Relay) with dedicated bypass controls (`allow-privacy-relays`).
+- **Gaming Optimizer & WARP Bypass**: Preserves competitive players utilizing latency routing services and privacy proxies (Cloudflare WARP, ExitLag, WTFast, NoPing, Mudfish, GearUP, LagoFast) without false positive kicks.
 - **Batched Discord Telemetry**: Rate-limit-aware webhook dispatcher consolidates attack waves into structured digest embeds, preventing HTTP 429 webhook drops during floods.
 - **In-Memory Cache**: High-throughput memory cache eliminates redundant API queries during player reconnects or proxy server switches.
 - **Local Lists**: Administrative `/sentinel` commands for in-game IP and username whitelisting and blacklisting.
@@ -69,11 +68,11 @@ To connect to the Sentinel intelligence network:
 
 ## Installation
 
-1. Download `Sentinel-Minecraft-1.1.0.jar` from the [Releases](https://github.com/antivpn-tech/sentinel-mc/releases) page.
+1. Download `Sentinel-Minecraft-1.1.1.jar` from the [Releases](https://github.com/antivpn-tech/sentinel-mc/releases) page.
 2. Place the JAR into your server's `plugins/` directory:
-   - Velocity: `/plugins/Sentinel-Minecraft-1.1.0.jar`
-   - BungeeCord / Waterfall: `/plugins/Sentinel-Minecraft-1.1.0.jar`
-   - Paper / Purpur / Spigot: `/plugins/Sentinel-Minecraft-1.1.0.jar`
+   - Velocity: `/plugins/Sentinel-Minecraft-1.1.1.jar`
+   - BungeeCord / Waterfall: `/plugins/Sentinel-Minecraft-1.1.1.jar`
+   - Paper / Purpur / Spigot: `/plugins/Sentinel-Minecraft-1.1.1.jar`
 3. Start the server to generate default configurations.
 4. Configure your license key in `plugins/Sentinel/config.yml` (or `plugins/sentinel/config.yml` on Velocity).
 5. Execute `/sentinel reload` to apply settings.
@@ -108,12 +107,8 @@ mode: "ENFORCE"
 # Risk threshold (0 - 100). Commercial VPNs and proxies rate 85-100.
 risk-threshold: 80
 
-# Whitelist gaming VPNs / latency optimizers (ExitLag, WTFast, NoPing, Mudfish, GearUP, LagoFast)
+# Whitelist gaming VPNs and ping optimizers (Cloudflare WARP, ExitLag, WTFast, NoPing, Mudfish, GearUP, LagoFast)
 allow-gaming-optimizers: true
-
-# Whitelist privacy relay services (Cloudflare WARP, Apple iCloud Private Relay)
-# Set to false on competitive/anarchy networks where IP masking is restricted.
-allow-privacy-relays: true
 
 # Graduated Defense Policy (Recommended: true)
 # Immediately kicks deterministic threats while protecting mobile/CGNAT pools

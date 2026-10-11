@@ -88,7 +88,6 @@ class SentinelPaperPlugin : JavaPlugin(), CommandExecutor, TabCompleter {
             mode = c.getString("mode", "ENFORCE") ?: "ENFORCE",
             riskThreshold = c.getInt("risk-threshold", 80),
             allowGamingOptimizers = c.getBoolean("allow-gaming-optimizers", true),
-            allowPrivacyRelays = c.getBoolean("allow-privacy-relays", true),
             graduatedDefense = c.getBoolean("graduated-defense", true),
             cacheDurationMinutes = c.getInt("cache-duration-minutes", 30),
             discordEnabled = c.getBoolean("discord.enabled", true),
