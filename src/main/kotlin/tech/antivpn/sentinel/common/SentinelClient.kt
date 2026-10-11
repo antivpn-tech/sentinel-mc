@@ -146,7 +146,7 @@ class SentinelClient(
         return ip
     }
 
-    private fun parseVerdict(ip: String, jsonBody: String): SentinelVerdict {
+    internal fun parseVerdict(ip: String, jsonBody: String): SentinelVerdict {
         return try {
             val root = JsonParser.parseString(jsonBody).asJsonObject
 
@@ -156,6 +156,7 @@ class SentinelClient(
             val threatType = if (root.has("threat_type") && !root.get("threat_type").isJsonNull) root.get("threat_type").asString else "Clean Residential"
             val isVpn = root.has("is_vpn") && !root.get("is_vpn").isJsonNull && root.get("is_vpn").asBoolean
             val isGamingOptimizer = root.has("is_gaming_optimizer") && !root.get("is_gaming_optimizer").isJsonNull && root.get("is_gaming_optimizer").asBoolean
+            val isPrivacyRelay = root.has("is_privacy_relay") && !root.get("is_privacy_relay").isJsonNull && root.get("is_privacy_relay").asBoolean
             val asn = if (root.has("asn") && !root.get("asn").isJsonNull) root.get("asn").asLong else 0L
             val provider = if (root.has("provider") && !root.get("provider").isJsonNull) root.get("provider").asString else "Unknown Provider"
             val hostname = if (root.has("hostname") && !root.get("hostname").isJsonNull) root.get("hostname").asString else null
@@ -193,6 +194,7 @@ class SentinelClient(
                 threatType = threatType,
                 isVpn = isVpn,
                 isGamingOptimizer = isGamingOptimizer,
+                isPrivacyRelay = isPrivacyRelay,
                 asn = asn,
                 provider = provider,
                 hostname = hostname,

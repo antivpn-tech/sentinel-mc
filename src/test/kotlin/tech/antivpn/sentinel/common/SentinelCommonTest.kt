@@ -78,6 +78,45 @@ class SentinelCommonTest {
         assertFalse(cleanVerdict.isThreat(threshold = 80, allowGamingOptimizers = true))
         assertFalse(cleanVerdict.isHardThreat(threshold = 80, allowGamingOptimizers = true))
         assertFalse(cleanVerdict.isSuspectResidentialTunnel())
+
+        val privacyRelayVerdict = SentinelVerdict(
+            ip = "104.28.1.1",
+            action = "ALLOW",
+            riskScore = 35,
+            confidence = 0.95,
+            threatType = "Privacy Relay",
+            reasonCodes = listOf("PRIVACY_RELAY_VERIFIED"),
+            isVpn = false,
+            isPrivacyRelay = true
+        )
+        // Privacy relay should not be flagged as a threat or hard threat
+        assertFalse(privacyRelayVerdict.isThreat(threshold = 30, allowGamingOptimizers = true))
+        assertFalse(privacyRelayVerdict.isHardThreat(threshold = 30, allowGamingOptimizers = true))
+    }
+
+    @Test
+    fun testPrivacyRelayParsing() {
+        val client = SentinelClient(SentinelConfig.createDefault())
+        val json = """
+            {
+                "ip": "17.0.0.1",
+                "action": "ALLOW",
+                "risk_score": 35,
+                "threat_type": "Privacy Relay",
+                "is_vpn": false,
+                "is_privacy_relay": true,
+                "asn": 20940,
+                "provider": "Apple Private Relay / Akamai",
+                "reason_codes": ["PRIVACY_RELAY_VERIFIED"]
+            }
+        """.trimIndent()
+
+        val verdict = client.parseVerdict("17.0.0.1", json)
+        assertTrue(verdict.isPrivacyRelay)
+        assertFalse(verdict.isVpn)
+        assertEquals(35, verdict.riskScore)
+        assertEquals("Privacy Relay", verdict.threatType)
+        assertFalse(verdict.isThreat(threshold = 30, allowGamingOptimizers = false))
     }
 
     @Test

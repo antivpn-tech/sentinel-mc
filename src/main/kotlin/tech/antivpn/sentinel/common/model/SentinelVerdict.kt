@@ -11,6 +11,7 @@ data class SentinelVerdict(
     val threatType: String = "Clean Residential",
     val isVpn: Boolean = false,
     val isGamingOptimizer: Boolean = false,
+    val isPrivacyRelay: Boolean = false,
     val asn: Long = 0,
     val provider: String = "Unknown Provider",
     val hostname: String? = null,
@@ -29,6 +30,9 @@ data class SentinelVerdict(
         if (allowGamingOptimizers && isGamingOptimizer) {
             return false
         }
+        if (isPrivacyRelay && !isVpn) {
+            return false
+        }
         return action.equals("BLOCK", ignoreCase = true) || riskScore >= threshold || isVpn
     }
 
@@ -38,6 +42,9 @@ data class SentinelVerdict(
      */
     fun isHardThreat(threshold: Int = 80, allowGamingOptimizers: Boolean = true): Boolean {
         if (allowGamingOptimizers && isGamingOptimizer) {
+            return false
+        }
+        if (isPrivacyRelay && !isVpn) {
             return false
         }
         if (action.equals("BLOCK", ignoreCase = true)) {
