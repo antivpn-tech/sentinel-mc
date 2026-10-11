@@ -15,6 +15,7 @@ class SentinelCommonTest {
         assertFalse(config.isAuditMode)
         assertEquals(80, config.riskThreshold)
         assertTrue(config.allowGamingOptimizers)
+        assertTrue(config.allowPrivacyRelays)
         assertTrue(config.antiBotEnabled)
     }
 
@@ -89,9 +90,13 @@ class SentinelCommonTest {
             isVpn = false,
             isPrivacyRelay = true
         )
-        // Privacy relay should not be flagged as a threat or hard threat
-        assertFalse(privacyRelayVerdict.isThreat(threshold = 30, allowGamingOptimizers = true))
-        assertFalse(privacyRelayVerdict.isHardThreat(threshold = 30, allowGamingOptimizers = true))
+        // Privacy relay should not be flagged as a threat or hard threat when allowPrivacyRelays is true
+        assertFalse(privacyRelayVerdict.isThreat(threshold = 30, allowGamingOptimizers = true, allowPrivacyRelays = true))
+        assertFalse(privacyRelayVerdict.isHardThreat(threshold = 30, allowGamingOptimizers = true, allowPrivacyRelays = true))
+
+        // Privacy relay should be flagged when allowPrivacyRelays is false
+        assertTrue(privacyRelayVerdict.isThreat(threshold = 30, allowGamingOptimizers = true, allowPrivacyRelays = false))
+        assertTrue(privacyRelayVerdict.isHardThreat(threshold = 30, allowGamingOptimizers = true, allowPrivacyRelays = false))
     }
 
     @Test
@@ -116,7 +121,8 @@ class SentinelCommonTest {
         assertFalse(verdict.isVpn)
         assertEquals(35, verdict.riskScore)
         assertEquals("Privacy Relay", verdict.threatType)
-        assertFalse(verdict.isThreat(threshold = 30, allowGamingOptimizers = false))
+        assertFalse(verdict.isThreat(threshold = 30, allowGamingOptimizers = false, allowPrivacyRelays = true))
+        assertTrue(verdict.isThreat(threshold = 30, allowGamingOptimizers = false, allowPrivacyRelays = false))
     }
 
     @Test

@@ -30,9 +30,14 @@ mode: "ENFORCE"
 # Commercial VPNs & Datacenters rate 85-100. Clean residential rates 0.
 risk-threshold: 80
 
-# Ignore gaming VPNs / network optimizers (ExitLag, WTFast, Cloudflare WARP, NoPing, Mudfish, GearUP)
-# Recommended true so legitimate competitive players optimizing ping are not blocked.
+# Whitelist gaming VPNs / network ping optimizers (ExitLag, WTFast, NoPing, Mudfish, GearUP, LagoFast)
+# Recommended true so legitimate competitive players optimizing routing/latency are not blocked.
 allow-gaming-optimizers: true
+
+# Whitelist encrypted privacy relay services (Cloudflare WARP, Apple iCloud Private Relay)
+# Recommended true for general public servers to preserve mobile and privacy relay players.
+# Set to false on competitive/anarchy servers where players must not mask their network origin.
+allow-privacy-relays: true
 
 # Graduated Defense Policy (Recommended: true)
 # When true, deterministic threats (Commercial VPN, Datacenter VPS, Tor Exit Nodes)

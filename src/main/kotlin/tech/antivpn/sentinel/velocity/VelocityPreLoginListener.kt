@@ -51,14 +51,14 @@ class VelocityPreLoginListener(private val plugin: SentinelVelocityPlugin) {
                 // Non-blocking asynchronous edge query
                 val verdict = plugin.sentinelClient.evaluate(ip).join()
 
-                val isThreat = verdict.isThreat(config.riskThreshold, config.allowGamingOptimizers)
+                val isThreat = verdict.isThreat(config.riskThreshold, config.allowGamingOptimizers, config.allowPrivacyRelays)
 
                 if (isThreat || !config.discordNotifyOnlyOnThreat) {
                     val enforce = !config.isAuditMode
 
                     if (enforce && isThreat) {
                         val isSuspectResidential = verdict.isSuspectResidentialTunnel()
-                        if (config.graduatedDefense && isSuspectResidential && !verdict.isHardThreat(config.riskThreshold, config.allowGamingOptimizers)) {
+                        if (config.graduatedDefense && isSuspectResidential && !verdict.isHardThreat(config.riskThreshold, config.allowGamingOptimizers, config.allowPrivacyRelays)) {
                             // Graduated Defense: Allow connection to protect legitimate players on shared mobile CGNAT pools, but alert staff
                             plugin.webhookNotifier.sendAlert(username, verdict, false)
                             plugin.logger.warn(

@@ -23,15 +23,25 @@ data class SentinelVerdict(
     val durationMs: Long = 0
 ) {
     /**
-     * Determines whether this connection is classified as a threat given the threshold
-     * and gaming optimizer whitelist settings.
+     * Determines whether this connection is classified as a threat given the threshold,
+     * gaming optimizer whitelist, and privacy relay settings.
      */
-    fun isThreat(threshold: Int, allowGamingOptimizers: Boolean): Boolean {
+    fun isThreat(
+        threshold: Int,
+        allowGamingOptimizers: Boolean = true,
+        allowPrivacyRelays: Boolean = true
+    ): Boolean {
         if (allowGamingOptimizers && isGamingOptimizer) {
             return false
         }
-        if (isPrivacyRelay && !isVpn) {
+        if (!allowGamingOptimizers && isGamingOptimizer) {
+            return true
+        }
+        if (allowPrivacyRelays && isPrivacyRelay && !isVpn) {
             return false
+        }
+        if (!allowPrivacyRelays && isPrivacyRelay) {
+            return true
         }
         return action.equals("BLOCK", ignoreCase = true) || riskScore >= threshold || isVpn
     }
@@ -40,12 +50,22 @@ data class SentinelVerdict(
      * Identifies deterministic hard threats (Commercial VPNs, Datacenter VPS, Tor Exit Nodes,
      * or high-confidence explicit blocks) where an immediate hard kick is statistically safe.
      */
-    fun isHardThreat(threshold: Int = 80, allowGamingOptimizers: Boolean = true): Boolean {
+    fun isHardThreat(
+        threshold: Int = 80,
+        allowGamingOptimizers: Boolean = true,
+        allowPrivacyRelays: Boolean = true
+    ): Boolean {
         if (allowGamingOptimizers && isGamingOptimizer) {
             return false
         }
-        if (isPrivacyRelay && !isVpn) {
+        if (!allowGamingOptimizers && isGamingOptimizer) {
+            return true
+        }
+        if (allowPrivacyRelays && isPrivacyRelay && !isVpn) {
             return false
+        }
+        if (!allowPrivacyRelays && isPrivacyRelay) {
+            return true
         }
         if (action.equals("BLOCK", ignoreCase = true)) {
             return true

@@ -19,7 +19,8 @@ It provides low-latency proxy and VPN detection, routing preservation for gaming
 - **Universal Drop-in Binary**: Single artifact automatically initializes on Velocity 3.3+, BungeeCord, Waterfall, Folia, and Paper / Purpur / Spigot 1.8 through 1.21+.
 - **Fail-Open Architecture**: Asynchronous non-blocking HTTP/2 queries. If the edge network or remote API is unreachable, queries resolve to `ALLOW` to prevent blocking legitimate players.
 - **Sentinel Gate Join Rate Limiting**: In-memory sliding-window join tracking throttles rapid connection floods from unverified IPs and enforces temporary quarantine cooldowns before thread pools can be saturated.
-- **Gaming Optimizer Bypass**: Preserves competitive players utilizing latency routing services and privacy relays (ExitLag, WTFast, Cloudflare WARP, NoPing, Mudfish, GearUP) from false positives.
+- **Gaming Optimizer Preservation**: Preserves competitive players utilizing latency routing services (ExitLag, WTFast, NoPing, Mudfish, GearUP, LagoFast) without false positives.
+- **Privacy Relay Intelligence**: Accurately recognizes encrypted privacy networks (Cloudflare WARP, Apple iCloud Private Relay) with dedicated bypass controls (`allow-privacy-relays`).
 - **Batched Discord Telemetry**: Rate-limit-aware webhook dispatcher consolidates attack waves into structured digest embeds, preventing HTTP 429 webhook drops during floods.
 - **In-Memory Cache**: High-throughput memory cache eliminates redundant API queries during player reconnects or proxy server switches.
 - **Local Lists**: Administrative `/sentinel` commands for in-game IP and username whitelisting and blacklisting.
@@ -68,11 +69,11 @@ To connect to the Sentinel intelligence network:
 
 ## Installation
 
-1. Download `Sentinel-Minecraft-1.0.0.jar` from the [Releases](https://github.com/antivpn-tech/sentinel-mc/releases) page.
+1. Download `Sentinel-Minecraft-1.1.0.jar` from the [Releases](https://github.com/antivpn-tech/sentinel-mc/releases) page.
 2. Place the JAR into your server's `plugins/` directory:
-   - Velocity: `/plugins/Sentinel-Minecraft-1.0.0.jar`
-   - BungeeCord / Waterfall: `/plugins/Sentinel-Minecraft-1.0.0.jar`
-   - Paper / Purpur / Spigot: `/plugins/Sentinel-Minecraft-1.0.0.jar`
+   - Velocity: `/plugins/Sentinel-Minecraft-1.1.0.jar`
+   - BungeeCord / Waterfall: `/plugins/Sentinel-Minecraft-1.1.0.jar`
+   - Paper / Purpur / Spigot: `/plugins/Sentinel-Minecraft-1.1.0.jar`
 3. Start the server to generate default configurations.
 4. Configure your license key in `plugins/Sentinel/config.yml` (or `plugins/sentinel/config.yml` on Velocity).
 5. Execute `/sentinel reload` to apply settings.
@@ -107,8 +108,16 @@ mode: "ENFORCE"
 # Risk threshold (0 - 100). Commercial VPNs and proxies rate 85-100.
 risk-threshold: 80
 
-# Ignore gaming VPNs, ping optimizers, and privacy relays (ExitLag, WTFast, Cloudflare WARP, NoPing, Mudfish, GearUP)
+# Whitelist gaming VPNs / latency optimizers (ExitLag, WTFast, NoPing, Mudfish, GearUP, LagoFast)
 allow-gaming-optimizers: true
+
+# Whitelist privacy relay services (Cloudflare WARP, Apple iCloud Private Relay)
+# Set to false on competitive/anarchy networks where IP masking is restricted.
+allow-privacy-relays: true
+
+# Graduated Defense Policy (Recommended: true)
+# Immediately kicks deterministic threats while protecting mobile/CGNAT pools
+graduated-defense: true
 
 # In-memory IP cache duration in minutes
 cache-duration-minutes: 30
