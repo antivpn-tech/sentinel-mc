@@ -80,7 +80,7 @@ class SentinelClient(
             val request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 .timeout(Duration.ofMillis(config.timeoutMs.toLong()))
-                .header("User-Agent", "Sentinel-Minecraft/1.0.0")
+                .header("User-Agent", "Sentinel-Minecraft/1.1.0")
                 .header("Accept", "application/json")
                 .header("Authorization", "Bearer ${config.licenseKey}")
                 .header("X-Sentinel-Key", config.licenseKey)

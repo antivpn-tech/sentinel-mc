@@ -24,7 +24,7 @@ import java.nio.file.Path
 @Plugin(
     id = "sentinel",
     name = "Sentinel",
-    version = "1.0.0",
+    version = "1.1.0",
     description = "Enterprise Anti-VPN, Proxy Evasion, and Sentinel Gate Protection for Velocity.",
     authors = ["Sentinel"]
 )
@@ -60,7 +60,7 @@ class SentinelVelocityPlugin @Inject constructor(
         commandManager.register(meta, SentinelVelocityCommand(this))
 
         logger.info("==================================================")
-        logger.info(" Sentinel Anti-VPN Connector v1.0.0 (Velocity)")
+        logger.info(" Sentinel Anti-VPN Connector v1.1.0 (Velocity)")
         logger.info(" Mode: {} {}", sentinelConfig.mode, if (sentinelConfig.isAuditMode) "(AUDIT - PASSIVE MONITORING)" else "(ACTIVE ENFORCEMENT - BLOCKING VPNS)")
         logger.info(" Risk Threshold: {} / 100", sentinelConfig.riskThreshold)
         logger.info(" Graduated Defense: {}", if (sentinelConfig.graduatedDefense) "ENABLED (Soft-alert suspect residential)" else "DISABLED")
