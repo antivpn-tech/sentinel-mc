@@ -50,6 +50,8 @@ cache-duration-minutes: 30
 # Sentinel Gate™ - Intelligent Anti-Bot Burst Protection
 # Detects rapid join bursts from new, unverified IPs and temporarily closes
 # the gate against bot attacks. Real players and cached IPs pass freely.
+# For full Rust Limbo physics & Captcha checks, pair with Sentinel Anti-Bot:
+# https://github.com/antivpn-tech/sentinel-antibot
 # ------------------------------------------------------------------------------
 anti-bot:
   enabled: true

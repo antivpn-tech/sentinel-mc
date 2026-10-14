@@ -54,6 +54,10 @@ flowchart TD
 3. **Quarantine Cooldown**: Unverified IPs attempting connection while the gate is active are quarantined for 60 seconds to suppress retry floods.
 4. **Legitimate Player Exemption**: Existing authenticated players and cached residential connections bypass the gate entirely.
 
+> [!TIP]
+> **Need Full Limbo Physics & Captcha Verification?**  
+> Pair `sentinel-mc` with **[Sentinel Anti-Bot (`sentinel-antibot`)](https://github.com/antivpn-tech/sentinel-antibot)**—our companion Rust-powered multi-version (`1.8` – `26.3+`) limbo verification plugin with zero-disconnect transfers, 6-layer gravity/ping checks, and native Map Captchas.
+
 ---
 
 ## Authentication and Licenses
