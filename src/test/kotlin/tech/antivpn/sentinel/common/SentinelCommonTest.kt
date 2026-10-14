@@ -195,4 +195,56 @@ class SentinelCommonTest {
         // Different subnet is not individually quarantined
         assertFalse(gate.isQuarantined(ipDiff))
     }
+
+    @Test
+    fun testBatchEndpointAndParsing() {
+        val client = SentinelClient(SentinelConfig.createDefault())
+        assertEquals(
+            "https://api.antivpn.tech/v1/batch",
+            client.resolveBatchEndpoint("https://api.antivpn.tech/v1/check")
+        )
+        assertEquals(
+            "https://example.com/api/batch",
+            client.resolveBatchEndpoint("https://example.com/api/check")
+        )
+
+        val batchJson = """
+            {
+                "count": 2,
+                "results": [
+                    {
+                        "ip": "185.220.101.1",
+                        "action": "BLOCK",
+                        "risk_score": 99,
+                        "confidence": 0.99,
+                        "threat_type": "Tor Exit Node",
+                        "is_vpn": true,
+                        "reason_codes": ["TOR_EXIT_NODE"]
+                    },
+                    {
+                        "ip": "8.8.8.8",
+                        "action": "ALLOW",
+                        "risk_score": 0,
+                        "confidence": 0.99,
+                        "threat_type": "Clean Residential",
+                        "is_vpn": false,
+                        "reason_codes": ["CARRIER_RESIDENTIAL_CLEAN"]
+                    }
+                ]
+            }
+        """.trimIndent()
+
+        val parsed = client.parseBatchVerdicts(listOf("185.220.101.1", "8.8.8.8", "9.9.9.9"), batchJson)
+        assertEquals(3, parsed.size)
+        assertEquals("BLOCK", parsed["185.220.101.1"]?.action)
+        assertEquals(99, parsed["185.220.101.1"]?.riskScore)
+        assertEquals("ALLOW", parsed["8.8.8.8"]?.action)
+        // Missing IP in batch response fails open safely
+        assertEquals("ALLOW", parsed["9.9.9.9"]?.action)
+
+        // Unconfigured key fails open on evaluateBatch without throwing
+        val fallbackBatch = client.evaluateBatch(listOf("1.1.1.1", "127.0.0.1")).join()
+        assertEquals("ALLOW", fallbackBatch["1.1.1.1"]?.action)
+        assertEquals("ALLOW", fallbackBatch["127.0.0.1"]?.action)
+    }
 }
