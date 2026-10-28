@@ -1,0 +1,80 @@
+# ==============================================================================
+#                 Sentinel Anti-VPN Protection Configuration
+#                        https://antivpn.tech
+# ==============================================================================
+
+api:
+  # Sentinel Edge Intelligence API endpoint
+  endpoint: "https://api.antivpn.tech/v1/check"
+
+  # Your Sentinel License Key (Claim your free Developer key at https://antivpn.tech)
+  # Required: Paste your production license key below to enable real-time protection.
+  license-key: "stl_live_your_api_key_here"
+
+  # HTTP connection timeout in milliseconds (2500ms recommended to avoid fail-open under lag)
+  timeout-ms: 2500
+
+# ------------------------------------------------------------------------------
+# Protection Mode:
+# ENFORCE - Active Blocking Mode (Default).
+#           Kicks players whose IP risk score meets or exceeds risk-threshold.
+#
+# AUDIT   - Dry-Run / Passive Logging Mode.
+#           Logs threat detections to server console and dispatches Discord alerts,
+#           but NEVER blocks or kicks any players. Useful for network evaluation.
+# ------------------------------------------------------------------------------
+mode: "ENFORCE"
+
+# Risk threshold (0 - 100).
+# Connections with risk_score >= threshold will trigger an alert (and kick if ENFORCE).
+# Commercial VPNs & Datacenters rate 85-100. Clean residential rates 0.
+risk-threshold: 80
+
+# Whitelist gaming VPNs and ping optimizers (Cloudflare WARP, ExitLag, WTFast, NoPing, Mudfish, GearUP, LagoFast)
+# Recommended true so legitimate competitive players optimizing routing/latency are not blocked.
+allow-gaming-optimizers: true
+
+# Graduated Defense Policy (Recommended: true)
+# When true, deterministic threats (Commercial VPN, Datacenter VPS, Tor Exit Nodes)
+# are immediately kicked in ENFORCE mode. Probabilistic residential proxies and
+# covert tunnels trigger a staff warning and Discord alert without kicking the player,
+# protecting legitimate players sharing carrier or mobile CGNAT IP pools.
+# If set to false, all threats meeting risk-threshold are kicked regardless of type.
+graduated-defense: true
+
+# In-memory IP cache duration in minutes
+# Prevents redundant API queries when players reconnect or hop between proxy subservers.
+cache-duration-minutes: 30
+
+# ------------------------------------------------------------------------------
+# Discord Webhook Telemetry
+# Dispatches real-time security alerts directly to your Discord staff channel.
+# Features automatic burst aggregation to prevent Discord 429 rate limit drops.
+# ------------------------------------------------------------------------------
+discord:
+  enabled: true
+
+  # Paste your Discord Webhook URL below:
+  webhook-url: ""
+
+  # When true, only players detected as threats (VPN, Proxy, Tor, Swarm) trigger webhooks.
+  # When false, every connecting player's verdict is posted.
+  notify-only-on-threat: true
+
+  # Custom server / network name shown in the Discord alert footer
+  server-name: "Minecraft Network"
+
+# ------------------------------------------------------------------------------
+# Enforcement Kick Screen (Active when mode is set to ENFORCE)
+#
+# Line 1 is reserved and permanently enforced as: &9&lSentinel Protection
+# The header is automatically displayed in blue and cannot be removed.
+#
+# Configure your custom server description and appeal details below.
+# Supports Minecraft color formatting with & and newlines (\n or /n).
+# Placeholders: %player%, %ip%, %threat%, %risk%
+# ------------------------------------------------------------------------------
+enforcement:
+  # [Line 1 - Reserved Header: Sentinel Protection]
+  # Start custom description / details below:
+  kick-message: "&7VPN / Proxy traffic is restricted on this server.\n&8Threat: &f%threat% &7| &8Risk: &f%risk%/100\n&7Join our Discord (&fhttps://discord.gg/yourlink&7) to request VPN access."
