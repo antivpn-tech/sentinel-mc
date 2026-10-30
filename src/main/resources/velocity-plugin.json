@@ -1,7 +1,7 @@
 {
   "id": "sentinel",
   "name": "Sentinel",
-  "version": "1.0.0",
+  "version": "${project.version}",
   "description": "Enterprise Anti-VPN and Proxy Evasion Protection for Velocity.",
   "authors": [
     "Sentinel"
