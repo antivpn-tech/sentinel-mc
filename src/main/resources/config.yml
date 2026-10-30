@@ -67,8 +67,8 @@ discord:
 # ------------------------------------------------------------------------------
 # Enforcement Kick Screen (Active when mode is set to ENFORCE)
 #
-# Line 1 is reserved and permanently enforced as: &9&lSentinel Protection
-# The header is automatically displayed in blue and cannot be removed.
+# Line 1 is reserved and permanently enforced as: Sentinel Protection (Cyan Gradient)
+# The header is automatically displayed with a clean cyan gradient and cannot be removed.
 #
 # Configure your custom server description and appeal details below.
 # Supports Minecraft color formatting with & and newlines (\n or /n).

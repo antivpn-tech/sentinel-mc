@@ -19,12 +19,16 @@ import java.util.Locale
  */
 class SentinelPaperPlugin : JavaPlugin(), CommandExecutor, TabCompleter {
 
+    @Volatile
     lateinit var sentinelConfig: SentinelConfig
         private set
+    @Volatile
     lateinit var sentinelClient: SentinelClient
         private set
+    @Volatile
     lateinit var webhookNotifier: DiscordWebhookNotifier
         private set
+    @Volatile
     lateinit var listManager: SentinelListManager
         private set
 
@@ -65,7 +69,7 @@ class SentinelPaperPlugin : JavaPlugin(), CommandExecutor, TabCompleter {
 
     override fun onDisable() {
         if (::sentinelClient.isInitialized) {
-            sentinelClient.clearCache()
+            sentinelClient.shutdown()
         }
         if (::webhookNotifier.isInitialized) {
             webhookNotifier.shutdown()
@@ -74,51 +78,71 @@ class SentinelPaperPlugin : JavaPlugin(), CommandExecutor, TabCompleter {
     }
 
     fun loadConfiguration() {
-        reloadConfig()
-        val c = config
+        val oldClient = if (::sentinelClient.isInitialized) sentinelClient else null
+        val oldWebhook = if (::webhookNotifier.isInitialized) webhookNotifier else null
+        try {
+            reloadConfig()
+            val c = config
 
-        this.sentinelConfig = SentinelConfig(
-            endpoint = c.getString("api.endpoint", "https://api.antivpn.tech/v1/check") ?: "https://api.antivpn.tech/v1/check",
-            licenseKey = c.getString("api.license-key", "stl_live_your_api_key_here") ?: "stl_live_your_api_key_here",
-            timeoutMs = c.getInt("api.timeout-ms", 2500),
-            mode = c.getString("mode", "ENFORCE") ?: "ENFORCE",
-            riskThreshold = c.getInt("risk-threshold", 80),
-            allowGamingOptimizers = c.getBoolean("allow-gaming-optimizers", true),
-            graduatedDefense = c.getBoolean("graduated-defense", true),
-            cacheDurationMinutes = c.getInt("cache-duration-minutes", 30),
-            discordEnabled = c.getBoolean("discord.enabled", true),
-            discordWebhookUrl = c.getString("discord.webhook-url", "") ?: "",
-            discordNotifyOnlyOnThreat = c.getBoolean("discord.notify-only-on-threat", true),
-            discordServerName = c.getString("discord.server-name", "Minecraft Network") ?: "Minecraft Network",
-            kickMessage = if (c.isList("enforcement.kick-message")) {
-                c.getStringList("enforcement.kick-message").joinToString("\n")
-            } else {
-                c.getString(
-                    "enforcement.kick-message",
-                    "&7VPN / Proxy traffic is restricted on this server.\n&8Threat: &f%threat% &7| &8Risk: &f%risk%/100\n&7Join our Discord (&fhttps://discord.gg/yourlink&7) to request VPN access."
-                ) ?: "&7VPN / Proxy traffic is restricted on this server.\n&8Threat: &f%threat% &7| &8Risk: &f%risk%/100\n&7Join our Discord (&fhttps://discord.gg/yourlink&7) to request VPN access."
-            }
-        )
-
-        this.sentinelClient = SentinelClient(
-            this.sentinelConfig,
-            infoLogger = { logger.info(it) },
-            errorLogger = { logger.warning(it) }
-        )
-
-        this.webhookNotifier = DiscordWebhookNotifier(
-            this.sentinelConfig,
-            errorLogger = { logger.warning(it) }
-        )
-
-        if (!::listManager.isInitialized) {
-            this.listManager = SentinelListManager(
-                dataFolder.toPath(),
-                infoLogger = { logger.info(it) },
-                warnLogger = { logger.warning(it) }
+            this.sentinelConfig = SentinelConfig(
+                endpoint = c.getString("api.endpoint", "https://api.antivpn.tech/v1/check") ?: "https://api.antivpn.tech/v1/check",
+                licenseKey = c.getString("api.license-key", "stl_live_your_api_key_here") ?: "stl_live_your_api_key_here",
+                timeoutMs = c.getInt("api.timeout-ms", 2500).coerceIn(500, 30_000),
+                mode = c.getString("mode", "ENFORCE") ?: "ENFORCE",
+                riskThreshold = c.getInt("risk-threshold", 80).coerceIn(0, 100),
+                allowGamingOptimizers = c.getBoolean("allow-gaming-optimizers", true),
+                graduatedDefense = c.getBoolean("graduated-defense", true),
+                cacheDurationMinutes = c.getInt("cache-duration-minutes", 30).coerceAtLeast(0),
+                discordEnabled = c.getBoolean("discord.enabled", true),
+                discordWebhookUrl = c.getString("discord.webhook-url", "") ?: "",
+                discordNotifyOnlyOnThreat = c.getBoolean("discord.notify-only-on-threat", true),
+                discordServerName = c.getString("discord.server-name", "Minecraft Network") ?: "Minecraft Network",
+                kickMessage = if (c.isList("enforcement.kick-message")) {
+                    c.getStringList("enforcement.kick-message").joinToString("\n")
+                } else {
+                    c.getString(
+                        "enforcement.kick-message",
+                        "&7VPN / Proxy traffic is restricted on this server.\n&8Threat: &f%threat% &7| &8Risk: &f%risk%/100\n&7Join our Discord (&fhttps://discord.gg/yourlink&7) to request VPN access."
+                    ) ?: "&7VPN / Proxy traffic is restricted on this server.\n&8Threat: &f%threat% &7| &8Risk: &f%risk%/100\n&7Join our Discord (&fhttps://discord.gg/yourlink&7) to request VPN access."
+                }
             )
-        } else {
-            this.listManager.load()
+
+            this.sentinelClient = SentinelClient(
+                this.sentinelConfig,
+                infoLogger = { logger.info(it) },
+                errorLogger = { logger.warning(it) }
+            )
+
+            this.webhookNotifier = DiscordWebhookNotifier(
+                this.sentinelConfig,
+                errorLogger = { logger.warning(it) }
+            )
+
+            if (!::listManager.isInitialized) {
+                this.listManager = SentinelListManager(
+                    dataFolder.toPath(),
+                    infoLogger = { logger.info(it) },
+                    warnLogger = { logger.warning(it) }
+                )
+            } else {
+                this.listManager.load()
+            }
+            oldClient?.shutdown()
+            oldWebhook?.shutdown()
+        } catch (e: Exception) {
+            logger.severe("[Sentinel] Failed to load Paper configuration: ${e.message}")
+            if (::sentinelClient.isInitialized && sentinelClient !== oldClient) sentinelClient.shutdown()
+            if (::webhookNotifier.isInitialized && webhookNotifier !== oldWebhook) webhookNotifier.shutdown()
+            if (oldClient != null && oldWebhook != null && ::sentinelConfig.isInitialized) {
+                this.sentinelClient = oldClient
+                this.webhookNotifier = oldWebhook
+                logger.warning("[Sentinel] Retaining previous active configuration after reload error.")
+            } else {
+                this.sentinelConfig = SentinelConfig.createDefault()
+                this.sentinelClient = SentinelClient(this.sentinelConfig, { logger.info(it) }, { logger.warning(it) })
+                this.webhookNotifier = DiscordWebhookNotifier(this.sentinelConfig) { logger.warning(it) }
+                this.listManager = SentinelListManager(dataFolder.toPath(), { logger.info(it) }, { logger.warning(it) })
+            }
         }
     }
 
@@ -166,6 +190,10 @@ class SentinelPaperPlugin : JavaPlugin(), CommandExecutor, TabCompleter {
 
             if (args[1].equals("add", ignoreCase = true) && args.size >= 3) {
                 val target = args[2]
+                if (!SentinelListManager.isValidTarget(target)) {
+                    sender.sendMessage("${ChatColor.RED}[Sentinel] '$target' is not a valid IP address, CIDR subnet, or Minecraft username.")
+                    return true
+                }
                 val added = listManager.addWhitelist(target)
                 if (added) {
                     sender.sendMessage("${ChatColor.GREEN}[Sentinel] Added '$target' to the whitelist.")
@@ -209,6 +237,10 @@ class SentinelPaperPlugin : JavaPlugin(), CommandExecutor, TabCompleter {
 
             if (args[1].equals("add", ignoreCase = true) && args.size >= 3) {
                 val target = args[2]
+                if (!SentinelListManager.isValidTarget(target)) {
+                    sender.sendMessage("${ChatColor.RED}[Sentinel] '$target' is not a valid IP address, CIDR subnet, or Minecraft username.")
+                    return true
+                }
                 val added = listManager.addBlacklist(target)
                 if (added) {
                     sender.sendMessage("${ChatColor.RED}[Sentinel] Added '$target' to the blacklist.")
@@ -235,25 +267,31 @@ class SentinelPaperPlugin : JavaPlugin(), CommandExecutor, TabCompleter {
 
         if (args[0].equals("check", ignoreCase = true) && args.size >= 2) {
             val targetInput = args[1]
-            var targetIp = targetInput
-            var displayName = targetInput
+            var targetIp: String
+            var displayName: String
 
-            if (!SentinelListManager.isIpAddress(targetInput)) {
-                val onlinePlayer = Bukkit.getPlayer(targetInput)
-                if (onlinePlayer != null && onlinePlayer.address != null) {
-                    targetIp = onlinePlayer.address!!.address.hostAddress
+            if (!SentinelListManager.isSingleIpAddress(targetInput)) {
+                val onlinePlayer = Bukkit.getPlayerExact(targetInput) ?: Bukkit.getPlayer(targetInput)
+                val inetAddr = onlinePlayer?.address?.address
+                if (onlinePlayer != null && inetAddr != null) {
+                    targetIp = inetAddr.hostAddress.substringBefore('%')
                     displayName = "${onlinePlayer.name} ($targetIp)"
                 } else {
-                    sender.sendMessage("${ChatColor.RED}[Sentinel] Player '$targetInput' is not online. To check an offline target, provide their direct IP.")
+                    sender.sendMessage("${ChatColor.RED}[Sentinel] Player '$targetInput' is not online (or input is not a valid single IP). Provide a direct IP to check an offline target.")
                     return true
                 }
+            } else {
+                targetIp = SentinelListManager.normalizeIp(targetInput)
+                displayName = targetIp
             }
 
             sender.sendMessage("${ChatColor.GRAY}[Sentinel] Querying edge intelligence for $displayName...")
             val finalDisplay = displayName
+            val cfg = sentinelConfig
             sentinelClient.evaluate(targetIp).thenAccept { verdict ->
+                val isThreat = verdict.isThreat(cfg.riskThreshold, cfg.allowGamingOptimizers)
                 val color = when {
-                    verdict.riskScore >= 80 -> ChatColor.RED
+                    isThreat || verdict.riskScore >= cfg.riskThreshold -> ChatColor.RED
                     verdict.riskScore >= 40 -> ChatColor.YELLOW
                     else -> ChatColor.GREEN
                 }
@@ -268,6 +306,9 @@ class SentinelPaperPlugin : JavaPlugin(), CommandExecutor, TabCompleter {
                     sender.sendMessage("${ChatColor.GRAY}Reasons: ${ChatColor.WHITE}${verdict.reasons.joinToString(", ")}")
                 }
                 sender.sendMessage("${ChatColor.DARK_GRAY}---------------------------------------------")
+            }.exceptionally { ex ->
+                sender.sendMessage("${ChatColor.RED}[Sentinel] Failed to check $finalDisplay: ${ex.message}")
+                null
             }
             return true
         }

@@ -1,7 +1,7 @@
 # Sentinel Minecraft Connector
 
 <p align="center">
-  <a href="https://github.com/antivpn-tech/sentinel-mc/releases"><img src="https://img.shields.io/github/v/release/antivpn-tech/sentinel-mc?color=2563EB&label=Release" alt="Release"></a>
+  <a href="https://github.com/antivpn-tech/sentinel-mc-antivpn/releases"><img src="https://img.shields.io/github/v/release/antivpn-tech/sentinel-mc-antivpn?color=2563EB&label=Release" alt="Release"></a>
   <a href="https://kotlinlang.org"><img src="https://img.shields.io/badge/Language-Kotlin-7F52FF.svg" alt="Kotlin"></a>
   <a href="https://papermc.io"><img src="https://img.shields.io/badge/Platform-Paper%20%7C%20Folia%20%7C%20Velocity%20%7C%20BungeeCord-EA580C.svg" alt="Platforms"></a>
   <a href="https://antivpn.tech"><img src="https://img.shields.io/badge/API-api.antivpn.tech-059669.svg" alt="Sentinel API"></a>
@@ -19,9 +19,10 @@ It provides low-latency proxy and VPN detection, and routing preservation for ga
 - **Universal Drop-in Binary**: Single artifact automatically initializes on Velocity 3.3+, BungeeCord, Waterfall, Folia, and Paper / Purpur / Spigot 1.8 through 1.21+.
 - **Fail-Open Architecture**: Asynchronous non-blocking HTTP/2 queries. If the edge network or remote API is unreachable, queries resolve to `ALLOW` to prevent blocking legitimate players.
 - **Gaming Optimizer & WARP Bypass**: Preserves competitive players utilizing latency routing services and privacy proxies (Cloudflare WARP, ExitLag, WTFast, NoPing, Mudfish, GearUP, LagoFast) without false positive kicks.
+- **Join-Wave Micro-Batching & Coalescing**: Automatically coalesces duplicate in-flight checks and batches concurrent join waves via `/v1/batch`.
 - **Batched Discord Telemetry**: Rate-limit-aware webhook dispatcher consolidates attack waves into structured digest embeds, preventing HTTP 429 webhook drops during floods.
-- **In-Memory Cache**: High-throughput memory cache eliminates redundant API queries during player reconnects or proxy server switches.
-- **Local Lists**: Administrative `/sentinel` commands for in-game IP and username whitelisting and blacklisting.
+- **IPv4 & IPv6 `/64` Subnet Cache**: High-throughput memory cache eliminates redundant API queries during reconnects and neutralizes rotating IPv6 `/64` bot swarms.
+- **Local Lists with CIDR Support**: Administrative `/sentinel` (alias `/antivpn`) commands for in-game username, single IP, and IPv4/IPv6 CIDR subnet whitelisting and blacklisting.
 
 ---
 
@@ -51,11 +52,11 @@ To connect to the Sentinel intelligence network:
 
 ## Installation
 
-1. Download `Sentinel-Minecraft-1.0.0.jar` from the [Releases](https://github.com/antivpn-tech/sentinel-mc/releases) page.
+1. Download `Sentinel-Minecraft-2.0.0.jar` from the [Releases](https://github.com/antivpn-tech/sentinel-mc-antivpn/releases) page.
 2. Place the JAR into your server's `plugins/` directory:
-   - Velocity: `/plugins/Sentinel-Minecraft-1.0.0.jar`
-   - BungeeCord / Waterfall: `/plugins/Sentinel-Minecraft-1.0.0.jar`
-   - Paper / Purpur / Spigot: `/plugins/Sentinel-Minecraft-1.0.0.jar`
+   - Velocity: `/plugins/Sentinel-Minecraft-2.0.0.jar`
+   - BungeeCord / Waterfall: `/plugins/Sentinel-Minecraft-2.0.0.jar`
+   - Paper / Purpur / Spigot: `/plugins/Sentinel-Minecraft-2.0.0.jar`
 3. Start the server to generate default configurations.
 4. Configure your license key in `plugins/Sentinel/config.yml` (or `plugins/sentinel/config.yml` on Velocity).
 5. Execute `/sentinel reload` to apply settings.
@@ -111,8 +112,9 @@ discord:
 
 # ------------------------------------------------------------------------------
 # Enforcement Disconnect Screen
-# Line 1 is reserved and permanently branded with: &9&lSentinel Protection (Blue)
+# Line 1 is reserved and permanently branded with: Sentinel Protection (Cyan Gradient)
 # Configure your custom server description and appeal details below (\n or /n)
+# Supports legacy (&) and shorthand hex (&#RRGGBB) color codes
 # Placeholders: %player%, %ip%, %threat%, %risk%
 # ------------------------------------------------------------------------------
 enforcement:
@@ -124,19 +126,19 @@ enforcement:
 
 ## Commands and Permissions
 
-Administrative commands require the `sentinel.admin` permission (granted to server operators by default).
+Administrative commands require the `sentinel.admin` permission (granted to server operators by default). Alias `/antivpn` is supported on all platforms, and `wl` / `bl` can be used as shorthand for `whitelist` / `blacklist`.
 
 | Command | Description |
 | :--- | :--- |
 | `/sentinel status` | Displays active protection mode, cache volume, list counts, and webhook state. |
 | `/sentinel reload` | Reloads `config.yml`, `whitelist.json`, and `blacklist.json`. |
 | `/sentinel check <ip\|player>` | Queries live intelligence for an online player or target IP address. |
-| `/sentinel whitelist list` | Lists all whitelisted usernames and IP addresses. |
-| `/sentinel whitelist add <player\|ip>` | Adds a target to the whitelist (bypasses all checks). |
-| `/sentinel whitelist remove <player\|ip>` | Removes a target from the whitelist. |
-| `/sentinel blacklist list` | Lists all blacklisted usernames and IP addresses. |
-| `/sentinel blacklist add <player\|ip>` | Adds a target to the blacklist (immediate rejection). |
-| `/sentinel blacklist remove <player\|ip>` | Removes a target from the blacklist. |
+| `/sentinel whitelist list` | Lists all whitelisted usernames, IP addresses, and CIDR subnets. |
+| `/sentinel whitelist add <player\|ip\|cidr>` | Adds a username, IP, or CIDR subnet to the whitelist (bypasses all checks). |
+| `/sentinel whitelist remove <player\|ip\|cidr>` | Removes a target from the whitelist. |
+| `/sentinel blacklist list` | Lists all blacklisted usernames, IP addresses, and CIDR subnets. |
+| `/sentinel blacklist add <player\|ip\|cidr>` | Adds a username, IP, or CIDR subnet to the blacklist (immediate rejection). |
+| `/sentinel blacklist remove <player\|ip\|cidr>` | Removes a target from the blacklist. |
 
 ---
 
@@ -147,12 +149,12 @@ Requirements:
 - Apache Maven 3.8 or higher
 
 ```bash
-git clone https://github.com/antivpn-tech/sentinel-mc.git
-cd sentinel-mc
+git clone https://github.com/antivpn-tech/sentinel-mc-antivpn.git
+cd sentinel-mc-antivpn
 mvn clean package
 ```
 
-The compiled universal JAR will be produced at `target/Sentinel-Minecraft-1.0.0.jar`.
+The compiled universal JAR will be produced at `target/Sentinel-Minecraft-2.0.0.jar`.
 
 ---
 

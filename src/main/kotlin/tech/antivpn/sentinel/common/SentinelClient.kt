@@ -4,6 +4,7 @@ import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import tech.antivpn.sentinel.common.model.SentinelVerdict
+import java.net.InetAddress
 import java.net.URI
 import java.net.URLEncoder
 import java.net.http.HttpClient
@@ -29,20 +30,27 @@ class SentinelClient(
     private val infoLogger: (String) -> Unit = {},
     private val errorLogger: (String) -> Unit = {}
 ) {
+    private val requestTimeoutMs: Long = config.timeoutMs.toLong().coerceIn(500L, 30_000L)
+
     private val httpClient: HttpClient = HttpClient.newBuilder()
         .version(HttpClient.Version.HTTP_2)
-        .connectTimeout(Duration.ofMillis(config.timeoutMs.toLong()))
+        .connectTimeout(Duration.ofMillis(requestTimeoutMs))
         .build()
 
     private val cache = ConcurrentHashMap<String, CacheEntry>()
     private val inFlight = ConcurrentHashMap<String, CompletableFuture<SentinelVerdict>>()
     private val activeRequests = AtomicInteger(0)
     private val waveQueue = ConcurrentLinkedQueue<PendingCheck>()
+    private val waveQueueSize = AtomicInteger(0)
     private val waveScheduled = AtomicBoolean(false)
     private val batchScheduler: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor { runnable ->
         Thread(runnable, "Sentinel-JoinWave-Batcher").apply { isDaemon = true }
     }
     private var hasWarnedUnconfiguredKey = false
+
+    init {
+        batchScheduler.scheduleWithFixedDelay(::evictExpiredCache, 5, 5, TimeUnit.MINUTES)
+    }
 
     private data class PendingCheck(
         val ip: String,
@@ -63,6 +71,7 @@ class SentinelClient(
     companion object {
         private const val MAX_BATCH_SIZE = 20
         private const val JOIN_WAVE_WINDOW_MS = 15L
+        private const val MAX_CACHE_ENTRIES = 50_000
     }
 
     /**
@@ -70,12 +79,23 @@ class SentinelClient(
      * Guaranteed fail-open: On timeout or network failure, returns an ALLOW verdict.
      * Automatically coalesces duplicate in-flight checks and batches concurrent join waves via /v1/batch.
      */
+    private fun cleanIp(raw: String): String {
+        val stripped = raw.trim().removeSurrounding("[", "]").substringBefore('%').trim()
+        if (stripped.startsWith("::ffff:", ignoreCase = true)) {
+            val v4Candidate = stripped.substring(7)
+            if (!v4Candidate.contains(':') && v4Candidate.contains('.')) {
+                return v4Candidate
+            }
+        }
+        return stripped
+    }
+
     fun evaluate(ip: String?): CompletableFuture<SentinelVerdict> {
         if (ip.isNullOrBlank() || isLocalAddress(ip)) {
-            return CompletableFuture.completedFuture(SentinelVerdict.fallbackAllow(ip ?: "unknown"))
+            return CompletableFuture.completedFuture(SentinelVerdict.fallbackAllow(if (ip.isNullOrBlank()) "unknown" else cleanIp(ip)))
         }
 
-        val normalizedIp = ip.trim()
+        val normalizedIp = cleanIp(ip)
 
         // Guard unconfigured / placeholder license keys
         if (isKeyUnconfigured()) {
@@ -87,7 +107,8 @@ class SentinelClient(
         val subnetKey = getSubnetKey(normalizedIp)
         val cached = cache[normalizedIp] ?: cache[subnetKey]
         if (cached != null && cached.isValid) {
-            return CompletableFuture.completedFuture(cached.verdict)
+            val verdict = if (cached.verdict.ip == normalizedIp) cached.verdict else cached.verdict.copy(ip = normalizedIp)
+            return CompletableFuture.completedFuture(verdict)
         }
 
         // Check if currently under HTTP 429 rate limit backoff
@@ -97,24 +118,35 @@ class SentinelClient(
         }
 
         // 2. Coalesce identical concurrent in-flight requests (same IP or /64 IPv6 subnet)
-        val existingInFlight = inFlight[normalizedIp] ?: inFlight[subnetKey]
+        val existingInFlight = inFlight[subnetKey]
         if (existingInFlight != null) {
-            return existingInFlight
+            return existingInFlight.handle { v, ex ->
+                if (ex != null || v == null) SentinelVerdict.fallbackAllow(normalizedIp)
+                else if (v.ip == normalizedIp) v else v.copy(ip = normalizedIp)
+            }
         }
 
         val resultFuture = CompletableFuture<SentinelVerdict>()
-        val previous = inFlight.putIfAbsent(normalizedIp, resultFuture)
+        val previous = inFlight.putIfAbsent(subnetKey, resultFuture)
         if (previous != null) {
-            return previous
+            return previous.handle { v, ex ->
+                if (ex != null || v == null) SentinelVerdict.fallbackAllow(normalizedIp)
+                else if (v.ip == normalizedIp) v else v.copy(ip = normalizedIp)
+            }
         }
+        resultFuture.orTimeout(requestTimeoutMs + 800L, TimeUnit.MILLISECONDS)
         resultFuture.whenComplete { _, _ ->
-            inFlight.remove(normalizedIp, resultFuture)
+            inFlight.remove(subnetKey, resultFuture)
+        }
+        val safeView = resultFuture.handle { v, ex ->
+            if (ex != null || v == null) SentinelVerdict.fallbackAllow(normalizedIp)
+            else if (v.ip == normalizedIp) v else v.copy(ip = normalizedIp)
         }
 
-        // 3. If another edge check is already in-flight, coalesce this join into a micro-batch wave (/v1/batch)
-        if (activeRequests.get() > 0) {
+        // 3. If another edge check is already in-flight or queued, coalesce into a micro-batch wave (/v1/batch)
+        if (activeRequests.get() > 0 || waveQueueSize.get() > 0) {
             enqueueWaveCheck(normalizedIp, resultFuture)
-            return resultFuture
+            return safeView
         }
 
         // 4. First check in an idle window fires immediately (zero artificial latency)
@@ -127,58 +159,74 @@ class SentinelClient(
                 resultFuture.complete(verdict ?: SentinelVerdict.fallbackAllow(normalizedIp))
             }
         }
-        return resultFuture
+        return safeView
     }
 
     private fun enqueueWaveCheck(ip: String, future: CompletableFuture<SentinelVerdict>) {
-        waveQueue.add(PendingCheck(ip, future))
-        if (waveQueue.size >= MAX_BATCH_SIZE) {
+        val currentSize: Int
+        synchronized(this) {
+            waveQueue.add(PendingCheck(ip, future))
+            currentSize = waveQueueSize.incrementAndGet()
+        }
+        if (currentSize >= MAX_BATCH_SIZE) {
             flushWaveQueue()
             return
         }
+        scheduleWaveFlush()
+    }
+
+    private fun scheduleWaveFlush() {
         if (waveScheduled.compareAndSet(false, true)) {
-            batchScheduler.schedule({
+            try {
+                batchScheduler.schedule({
+                    waveScheduled.set(false)
+                    flushWaveQueue()
+                }, JOIN_WAVE_WINDOW_MS, TimeUnit.MILLISECONDS)
+            } catch (_: Exception) {
                 waveScheduled.set(false)
                 flushWaveQueue()
-            }, JOIN_WAVE_WINDOW_MS, TimeUnit.MILLISECONDS)
+            }
         }
     }
 
     private fun flushWaveQueue() {
-        val batch = mutableListOf<PendingCheck>()
-        while (batch.size < MAX_BATCH_SIZE) {
-            val next = waveQueue.poll() ?: break
-            batch.add(next)
-        }
-        if (batch.isEmpty()) return
-
-        // If more remain in the queue, flush the next chunk immediately
-        if (waveQueue.isNotEmpty()) {
-            batchScheduler.execute { flushWaveQueue() }
-        }
-
-        if (batch.size == 1) {
-            val single = batch[0]
-            activeRequests.incrementAndGet()
-            sendSingleCheck(single.ip).whenComplete { verdict, ex ->
-                activeRequests.decrementAndGet()
-                single.future.complete(if (ex == null && verdict != null) verdict else SentinelVerdict.fallbackAllow(single.ip))
-            }
-            return
-        }
-
-        val ips = batch.map { it.ip }
-        activeRequests.incrementAndGet()
-        sendBatchChunk(ips).whenComplete { verdictMap, ex ->
-            activeRequests.decrementAndGet()
-            for (item in batch) {
-                val verdict = if (ex == null && verdictMap != null) {
-                    verdictMap[item.ip] ?: SentinelVerdict.fallbackAllow(item.ip)
-                } else {
-                    SentinelVerdict.fallbackAllow(item.ip)
+        while (true) {
+            val batch = mutableListOf<PendingCheck>()
+            synchronized(this) {
+                while (batch.size < MAX_BATCH_SIZE) {
+                    val next = waveQueue.poll() ?: break
+                    waveQueueSize.updateAndGet { if (it > 0) it - 1 else 0 }
+                    batch.add(next)
                 }
-                item.future.complete(verdict)
+                if (waveQueue.isEmpty()) {
+                    waveQueueSize.set(0)
+                }
             }
+            if (batch.isEmpty()) return
+
+            if (batch.size == 1) {
+                val single = batch[0]
+                activeRequests.incrementAndGet()
+                sendSingleCheck(single.ip).whenComplete { verdict, ex ->
+                    activeRequests.decrementAndGet()
+                    single.future.complete(if (ex == null && verdict != null) verdict else SentinelVerdict.fallbackAllow(single.ip))
+                }
+            } else {
+                val ips = batch.map { it.ip }
+                activeRequests.incrementAndGet()
+                sendBatchChunk(ips).whenComplete { verdictMap, ex ->
+                    activeRequests.decrementAndGet()
+                    for (item in batch) {
+                        val verdict = if (ex == null && verdictMap != null) {
+                            verdictMap[item.ip] ?: SentinelVerdict.fallbackAllow(item.ip)
+                        } else {
+                            SentinelVerdict.fallbackAllow(item.ip)
+                        }
+                        item.future.complete(verdict)
+                    }
+                }
+            }
+
         }
     }
 
@@ -201,7 +249,7 @@ class SentinelClient(
         }
 
         for (rawIp in ips) {
-            val trimmed = rawIp.trim()
+            val trimmed = cleanIp(rawIp)
             if (trimmed.isEmpty()) continue
 
             if (isLocalAddress(trimmed) || keyUnconfigured || now < backoffUntil) {
@@ -212,7 +260,7 @@ class SentinelClient(
             val subnetKey = getSubnetKey(trimmed)
             val cached = cache[trimmed] ?: cache[subnetKey]
             if (cached != null && cached.isValid) {
-                results[trimmed] = cached.verdict
+                results[trimmed] = if (cached.verdict.ip == trimmed) cached.verdict else cached.verdict.copy(ip = trimmed)
             } else {
                 uncached.add(trimmed)
             }
@@ -232,18 +280,28 @@ class SentinelClient(
         return CompletableFuture.allOf(*chunkFutures.toTypedArray())
             .thenApply {
                 for (rawIp in ips) {
-                    val trimmed = rawIp.trim()
-                    if (trimmed.isNotEmpty() && !results.containsKey(trimmed)) {
-                        results[trimmed] = SentinelVerdict.fallbackAllow(trimmed)
+                    val trimmed = cleanIp(rawIp)
+                    if (trimmed.isNotEmpty()) {
+                        val v = results[trimmed] ?: SentinelVerdict.fallbackAllow(trimmed)
+                        results[trimmed] = v
+                        val rawTrimmed = rawIp.trim()
+                        if (rawTrimmed.isNotEmpty() && rawTrimmed != trimmed) {
+                            results.putIfAbsent(rawTrimmed, v)
+                        }
                     }
                 }
                 results.toMap()
             }
             .exceptionally {
                 for (rawIp in ips) {
-                    val trimmed = rawIp.trim()
-                    if (trimmed.isNotEmpty() && !results.containsKey(trimmed)) {
-                        results[trimmed] = SentinelVerdict.fallbackAllow(trimmed)
+                    val trimmed = cleanIp(rawIp)
+                    if (trimmed.isNotEmpty()) {
+                        val v = results[trimmed] ?: SentinelVerdict.fallbackAllow(trimmed)
+                        results[trimmed] = v
+                        val rawTrimmed = rawIp.trim()
+                        if (rawTrimmed.isNotEmpty() && rawTrimmed != trimmed) {
+                            results.putIfAbsent(rawTrimmed, v)
+                        }
                     }
                 }
                 results.toMap()
@@ -253,15 +311,18 @@ class SentinelClient(
     private fun sendSingleCheck(normalizedIp: String): CompletableFuture<SentinelVerdict> {
         return try {
             val encodedIp = URLEncoder.encode(normalizedIp, StandardCharsets.UTF_8)
-            val url = "${config.endpoint}?ip=$encodedIp"
+            val baseEndpoint = config.endpoint.trim()
+            val separator = if (baseEndpoint.contains('?')) "&" else "?"
+            val url = "${baseEndpoint}${separator}ip=$encodedIp"
+            val cleanKey = config.licenseKey.trim()
 
             val request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
-                .timeout(Duration.ofMillis(config.timeoutMs.toLong()))
-                .header("User-Agent", "Sentinel-Minecraft/1.0.0")
+                .timeout(Duration.ofMillis(requestTimeoutMs))
+                .header("User-Agent", "Sentinel-Minecraft/2.0.0")
                 .header("Accept", "application/json")
-                .header("Authorization", "Bearer ${config.licenseKey}")
-                .header("X-Sentinel-Key", config.licenseKey)
+                .header("Authorization", "Bearer $cleanKey")
+                .header("X-Sentinel-Key", cleanKey)
                 .GET()
                 .build()
 
@@ -275,18 +336,20 @@ class SentinelClient(
                         cacheVerdict(normalizedIp, verdict)
                         verdict
                     } else if (status == 429) {
-                        val retryAfter = response.headers().firstValue("Retry-After").orElse("5").toLongOrNull() ?: 5L
+                        val retryAfter = (response.headers().firstValue("Retry-After").orElse("5").toLongOrNull() ?: 5L).coerceIn(1L, 300L)
                         backoffUntil = System.currentTimeMillis() + (retryAfter * 1000)
                         errorLogger("[Sentinel] ⚠️ Rate limit exceeded (HTTP 429). Backing off edge queries for ${retryAfter}s: ${response.body()}")
                         SentinelVerdict.fallbackAllow(normalizedIp)
-                    } else if (status == 403) {
-                        errorLogger("[Sentinel] 🚨 Edge API returned HTTP 403 (Quota Depleted or Forbidden): ${response.body()}. Failing open.")
+                    } else if (status == 401 || status == 403) {
+                        backoffUntil = System.currentTimeMillis() + 60_000L
+                        errorLogger("[Sentinel] 🚨 Edge API returned HTTP $status (Quota Depleted or Invalid Key): ${response.body()}. Backing off for 60s and failing open.")
                         SentinelVerdict.fallbackAllow(normalizedIp)
                     } else {
                         errorLogger("[Sentinel] Edge API returned HTTP $status for $normalizedIp: ${response.body()}")
                         SentinelVerdict.fallbackAllow(normalizedIp)
                     }
                 }
+                .orTimeout(requestTimeoutMs + 500L, TimeUnit.MILLISECONDS)
                 .exceptionally { ex ->
                     errorLogger("[Sentinel] Connection failure communicating with Sentinel Edge API: ${ex.message} (failing open)")
                     SentinelVerdict.fallbackAllow(normalizedIp)
@@ -309,14 +372,15 @@ class SentinelClient(
                 add("ips", arr)
             }.toString()
 
+            val cleanKey = config.licenseKey.trim()
             val request = HttpRequest.newBuilder()
                 .uri(URI.create(batchUrl))
-                .timeout(Duration.ofMillis(config.timeoutMs.toLong()))
-                .header("User-Agent", "Sentinel-Minecraft/1.0.0")
+                .timeout(Duration.ofMillis(requestTimeoutMs))
+                .header("User-Agent", "Sentinel-Minecraft/2.0.0")
                 .header("Content-Type", "application/json")
                 .header("Accept", "application/json")
-                .header("Authorization", "Bearer ${config.licenseKey}")
-                .header("X-Sentinel-Key", config.licenseKey)
+                .header("Authorization", "Bearer $cleanKey")
+                .header("X-Sentinel-Key", cleanKey)
                 .POST(HttpRequest.BodyPublishers.ofString(payload, StandardCharsets.UTF_8))
                 .build()
 
@@ -330,18 +394,20 @@ class SentinelClient(
                         verdicts.forEach { (ip, verdict) -> cacheVerdict(ip, verdict) }
                         verdicts
                     } else if (status == 429) {
-                        val retryAfter = response.headers().firstValue("Retry-After").orElse("5").toLongOrNull() ?: 5L
+                        val retryAfter = (response.headers().firstValue("Retry-After").orElse("5").toLongOrNull() ?: 5L).coerceIn(1L, 300L)
                         backoffUntil = System.currentTimeMillis() + (retryAfter * 1000)
                         errorLogger("[Sentinel] ⚠️ Batch rate limit exceeded (HTTP 429). Backing off edge queries for ${retryAfter}s.")
                         chunk.associateWith { SentinelVerdict.fallbackAllow(it) }
-                    } else if (status == 403) {
-                        errorLogger("[Sentinel] 🚨 Edge API returned HTTP 403 on batch check: ${response.body()}. Failing open.")
+                    } else if (status == 401 || status == 403) {
+                        backoffUntil = System.currentTimeMillis() + 60_000L
+                        errorLogger("[Sentinel] 🚨 Edge API returned HTTP $status on batch check: ${response.body()}. Backing off for 60s and failing open.")
                         chunk.associateWith { SentinelVerdict.fallbackAllow(it) }
                     } else {
                         errorLogger("[Sentinel] Edge API returned HTTP $status for batch check (${chunk.size} IPs): ${response.body()}")
                         chunk.associateWith { SentinelVerdict.fallbackAllow(it) }
                     }
                 }
+                .orTimeout(requestTimeoutMs + 500L, TimeUnit.MILLISECONDS)
                 .exceptionally { ex ->
                     errorLogger("[Sentinel] Batch connection failure communicating with Sentinel Edge API: ${ex.message} (failing open)")
                     chunk.associateWith { SentinelVerdict.fallbackAllow(it) }
@@ -363,18 +429,41 @@ class SentinelClient(
     }
 
     private fun cacheVerdict(ip: String, verdict: SentinelVerdict) {
+        if (verdict.reasonCodes.contains("EDGE_API_TIMEOUT_FAIL_OPEN")) {
+            return
+        }
         val ttlMs = config.cacheDurationMinutes.toLong() * 60 * 1000
+        if (ttlMs <= 0) return
+        if (cache.size >= MAX_CACHE_ENTRIES) {
+            evictExpiredCache()
+            if (cache.size >= MAX_CACHE_ENTRIES) {
+                // Evict ~10% of entries instead of wiping the entire cache during a flood
+                val toRemove = MAX_CACHE_ENTRIES / 10
+                val iterator = cache.keys.iterator()
+                var removed = 0
+                while (iterator.hasNext() && removed < toRemove) {
+                    iterator.next()
+                    iterator.remove()
+                    removed++
+                }
+            }
+        }
         val expiry = System.currentTimeMillis() + ttlMs
-        cache[ip] = CacheEntry(verdict, expiry)
         if (ip.contains(":")) {
             cache[getSubnetKey(ip)] = CacheEntry(verdict, expiry)
+        } else {
+            cache[ip] = CacheEntry(verdict, expiry)
         }
     }
 
+    private fun evictExpiredCache() {
+        val now = System.currentTimeMillis()
+        cache.entries.removeIf { now >= it.value.expiresAt }
+    }
+
     private fun isKeyUnconfigured(): Boolean {
-        return config.licenseKey.isBlank() ||
-                config.licenseKey == "stl_live_your_api_key_here" ||
-                config.licenseKey == "stl_test_showcase_demo"
+        val clean = config.licenseKey.trim()
+        return clean.isBlank() || clean == "stl_live_your_api_key_here"
     }
 
     private fun warnUnconfiguredKeyOnce() {
@@ -385,18 +474,20 @@ class SentinelClient(
     }
 
     internal fun resolveBatchEndpoint(endpoint: String): String {
-        val trimmed = endpoint.trim()
+        val withoutQuery = endpoint.trim().substringBefore('?').trimEnd('/')
         return when {
-            trimmed.endsWith("/v1/check") -> trimmed.removeSuffix("/v1/check") + "/v1/batch"
-            trimmed.endsWith("/api/check") -> trimmed.removeSuffix("/api/check") + "/api/batch"
-            trimmed.endsWith("/check") -> trimmed.removeSuffix("/check") + "/batch"
-            trimmed.endsWith("/v1/batch") || trimmed.endsWith("/api/batch") -> trimmed
-            else -> trimmed.trimEnd('/') + "/v1/batch"
+            withoutQuery.endsWith("/v1/check") -> withoutQuery.removeSuffix("/v1/check") + "/v1/batch"
+            withoutQuery.endsWith("/api/check") -> withoutQuery.removeSuffix("/api/check") + "/api/batch"
+            withoutQuery.endsWith("/check") -> withoutQuery.removeSuffix("/check") + "/batch"
+            withoutQuery.endsWith("/v1/batch") || withoutQuery.endsWith("/api/batch") -> withoutQuery
+            else -> "$withoutQuery/v1/batch"
         }
     }
 
     internal fun parseBatchVerdicts(requestedIps: List<String>, jsonBody: String): Map<String, SentinelVerdict> {
         val out = LinkedHashMap<String, SentinelVerdict>()
+        val byNormalizedIp = HashMap<String, SentinelVerdict>()
+        val requestedSet = requestedIps.toSet()
         try {
             val root = JsonParser.parseString(jsonBody).asJsonObject
             if (root.has("results") && root.get("results").isJsonArray) {
@@ -405,12 +496,22 @@ class SentinelClient(
                     val elem = resultsArray.get(i)
                     if (elem != null && elem.isJsonObject) {
                         val obj = elem.asJsonObject
-                        val fallbackIp = requestedIps.getOrNull(i) ?: "unknown"
-                        val itemIp = if (obj.has("ip") && !obj.get("ip").isJsonNull) obj.get("ip").asString else fallbackIp
+                        val hasExplicitIp = obj.has("ip") && !obj.get("ip").isJsonNull && obj.get("ip").asString.isNotBlank()
+                        val itemIp = if (hasExplicitIp) {
+                            obj.get("ip").asString.trim().substringBefore('%')
+                        } else {
+                            requestedIps.getOrNull(i) ?: "unknown"
+                        }
                         val verdict = parseVerdict(itemIp, obj.toString())
-                        out[itemIp] = verdict
+                        byNormalizedIp[SentinelListManager.normalizeIp(itemIp)] = verdict
+                        if (requestedSet.isEmpty() || requestedSet.contains(itemIp)) {
+                            out[itemIp] = verdict
+                        }
                         if (i < requestedIps.size) {
-                            out[requestedIps[i]] = verdict
+                            val reqIp = requestedIps[i]
+                            if (!hasExplicitIp || SentinelListManager.normalizeIp(reqIp) == SentinelListManager.normalizeIp(itemIp)) {
+                                out[reqIp] = if (verdict.ip == reqIp) verdict else verdict.copy(ip = reqIp)
+                            }
                         }
                     }
                 }
@@ -421,23 +522,39 @@ class SentinelClient(
 
         for (ip in requestedIps) {
             if (!out.containsKey(ip)) {
-                out[ip] = SentinelVerdict.fallbackAllow(ip)
+                val byNorm = byNormalizedIp[SentinelListManager.normalizeIp(ip)]
+                out[ip] = if (byNorm != null) {
+                    if (byNorm.ip == ip) byNorm else byNorm.copy(ip = ip)
+                } else {
+                    SentinelVerdict.fallbackAllow(ip)
+                }
             }
         }
         return out
     }
 
     /**
-     * Canonicalizes IPv6 addresses to their /64 subnet prefix to prevent
-     * rotating IPv6 bot swarm attacks from depleting license quota.
+     * Canonicalizes IPv6 addresses to their /64 subnet prefix (handling :: zero compression)
+     * to prevent rotating IPv6 bot swarm attacks from depleting license quota.
      */
     fun getSubnetKey(ip: String): String {
         if (!ip.contains(":")) return ip
-        val parts = ip.split(":")
-        if (parts.size >= 4) {
-            return "${parts[0]}:${parts[1]}:${parts[2]}:${parts[3]}::/64"
+        return try {
+            val cleanIp = ip.trim().substringBefore('%')
+            val literal = if (cleanIp.startsWith("[")) cleanIp else "[$cleanIp]"
+            val bytes = InetAddress.getByName(literal).address
+            if (bytes.size == 16) {
+                val h0 = ((bytes[0].toInt() and 0xFF) shl 8) or (bytes[1].toInt() and 0xFF)
+                val h1 = ((bytes[2].toInt() and 0xFF) shl 8) or (bytes[3].toInt() and 0xFF)
+                val h2 = ((bytes[4].toInt() and 0xFF) shl 8) or (bytes[5].toInt() and 0xFF)
+                val h3 = ((bytes[6].toInt() and 0xFF) shl 8) or (bytes[7].toInt() and 0xFF)
+                "%x:%x:%x:%x::/64".format(h0, h1, h2, h3)
+            } else {
+                ip
+            }
+        } catch (_: Exception) {
+            ip
         }
-        return ip
     }
 
     internal fun parseVerdict(ip: String, jsonBody: String): SentinelVerdict {
@@ -471,13 +588,22 @@ class SentinelClient(
                         reasonCodes.add(elem.asString)
                     }
                 }
-            } else if (root.has("reasons") && root.get("reasons").isJsonArray) {
+            }
+
+            val reasons = mutableListOf<String>()
+            if (root.has("reasons") && root.get("reasons").isJsonArray) {
                 val array = root.getAsJsonArray("reasons")
                 for (elem in array) {
                     if (!elem.isJsonNull) {
-                        reasonCodes.add(elem.asString)
+                        reasons.add(elem.asString)
                     }
                 }
+            }
+
+            if (reasonCodes.isEmpty() && reasons.isNotEmpty()) {
+                reasonCodes.addAll(reasons)
+            } else if (reasons.isEmpty() && reasonCodes.isNotEmpty()) {
+                reasons.addAll(reasonCodes)
             }
 
             SentinelVerdict(
@@ -496,7 +622,7 @@ class SentinelClient(
                 city = city,
                 region = region,
                 reasonCodes = reasonCodes,
-                reasons = reasonCodes,
+                reasons = reasons,
                 durationMs = durationMs
             )
         } catch (e: Exception) {
@@ -507,22 +633,86 @@ class SentinelClient(
 
     fun isCached(ip: String?): Boolean {
         if (ip.isNullOrBlank()) return false
-        val trimmed = ip.trim()
+        val trimmed = cleanIp(ip)
         val entry = cache[trimmed] ?: cache[getSubnetKey(trimmed)]
         return entry != null && entry.isValid
+    }
+
+    /**
+     * Returns the cached verdict for an IP without triggering any new evaluation or HTTP request.
+     * Checks the direct IP key first, then the IPv4/IPv6 subnet aggregation key.
+     */
+    fun getCachedVerdict(ip: String?): SentinelVerdict? {
+        if (ip.isNullOrBlank()) return null
+        val trimmed = cleanIp(ip)
+        val entry = cache[trimmed] ?: cache[getSubnetKey(trimmed)]
+        if (entry != null && entry.isValid) {
+            return if (entry.verdict.ip == trimmed) entry.verdict else entry.verdict.copy(ip = trimmed)
+        }
+        return null
     }
 
     fun clearCache() {
         cache.clear()
     }
 
+    fun shutdown() {
+        batchScheduler.shutdownNow()
+        while (true) {
+            val pending = waveQueue.poll() ?: break
+            pending.future.complete(SentinelVerdict.fallbackAllow(pending.ip))
+        }
+        waveQueueSize.set(0)
+        for ((key, future) in inFlight) {
+            future.complete(SentinelVerdict.fallbackAllow(key))
+        }
+        inFlight.clear()
+        cache.clear()
+    }
+
     val cacheSize: Int
-        get() = cache.size
+        get() {
+            evictExpiredCache()
+            return cache.size
+        }
 
     private fun isLocalAddress(ip: String): Boolean {
-        return ip == "127.0.0.1" || ip == "0:0:0:0:0:0:0:1" || ip == "::1" ||
-                ip.startsWith("192.168.") || ip.startsWith("10.") || ip.startsWith("172.16.") ||
-                ip.startsWith("172.17.") || ip.startsWith("172.18.") || ip.startsWith("172.19.") ||
-                ip.startsWith("172.2") || ip.startsWith("172.30.") || ip.startsWith("172.31.")
+        var clean = ip.trim().removeSurrounding("[", "]").lowercase().substringBefore('%')
+        if (clean.startsWith("::ffff:")) {
+            clean = clean.removePrefix("::ffff:")
+        }
+        if (clean == "127.0.0.1" || clean == "0.0.0.0" || clean == "localhost" ||
+            clean == "0:0:0:0:0:0:0:1" || clean == "0:0:0:0:0:0:0:0" || clean == "::1" || clean == "::"
+        ) {
+            return true
+        }
+        if (clean.startsWith("10.") || clean.startsWith("192.168.") || clean.startsWith("127.") ||
+            clean.startsWith("169.254.") || clean.startsWith("0.")
+        ) {
+            return true
+        }
+        if (clean.startsWith("172.")) {
+            val secondOctet = clean.removePrefix("172.").substringBefore('.').toIntOrNull()
+            if (secondOctet != null && secondOctet in 16..31) {
+                return true
+            }
+        }
+        if (clean.startsWith("100.")) {
+            val secondOctet = clean.removePrefix("100.").substringBefore('.').toIntOrNull()
+            if (secondOctet != null && secondOctet in 64..127) {
+                return true
+            }
+        }
+        if (clean.contains(':')) {
+            val firstHextet = clean.substringBefore(':')
+            if (firstHextet.length == 4 && (
+                firstHextet.startsWith("fc") || firstHextet.startsWith("fd") ||
+                firstHextet.startsWith("fe8") || firstHextet.startsWith("fe9") ||
+                firstHextet.startsWith("fea") || firstHextet.startsWith("feb")
+            )) {
+                return true
+            }
+        }
+        return false
     }
 }

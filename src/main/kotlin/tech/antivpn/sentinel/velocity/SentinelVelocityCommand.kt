@@ -83,6 +83,10 @@ class SentinelVelocityCommand(private val plugin: SentinelVelocityPlugin) : Simp
 
             if (args[1].equals("add", ignoreCase = true) && args.size >= 3) {
                 val target = args[2]
+                if (!SentinelListManager.isValidTarget(target)) {
+                    source.sendMessage(Component.text("[Sentinel] '$target' is not a valid IP address, CIDR subnet, or Minecraft username.", NamedTextColor.RED))
+                    return
+                }
                 val added = plugin.listManager.addWhitelist(target)
                 if (added) {
                     source.sendMessage(Component.text("[Sentinel] Added '$target' to the whitelist.", NamedTextColor.GREEN))
@@ -128,6 +132,10 @@ class SentinelVelocityCommand(private val plugin: SentinelVelocityPlugin) : Simp
 
             if (args[1].equals("add", ignoreCase = true) && args.size >= 3) {
                 val target = args[2]
+                if (!SentinelListManager.isValidTarget(target)) {
+                    source.sendMessage(Component.text("[Sentinel] '$target' is not a valid IP address, CIDR subnet, or Minecraft username.", NamedTextColor.RED))
+                    return
+                }
                 val added = plugin.listManager.addBlacklist(target)
                 if (added) {
                     source.sendMessage(Component.text("[Sentinel] Added '$target' to the blacklist.", NamedTextColor.RED))
@@ -154,30 +162,36 @@ class SentinelVelocityCommand(private val plugin: SentinelVelocityPlugin) : Simp
 
         if (args[0].equals("check", ignoreCase = true) && args.size >= 2) {
             val targetInput = args[1]
-            var targetIp = targetInput
-            var displayName = targetInput
+            var targetIp: String
+            var displayName: String
 
-            if (!SentinelListManager.isIpAddress(targetInput)) {
+            if (!SentinelListManager.isSingleIpAddress(targetInput)) {
                 val onlinePlayer = plugin.server.getPlayer(targetInput)
-                if (onlinePlayer.isPresent && onlinePlayer.get().remoteAddress != null) {
-                    targetIp = onlinePlayer.get().remoteAddress.address.hostAddress
+                val inetAddr = onlinePlayer.orElse(null)?.remoteAddress?.address
+                if (onlinePlayer.isPresent && inetAddr != null) {
+                    targetIp = inetAddr.hostAddress.substringBefore('%')
                     displayName = "${onlinePlayer.get().username} ($targetIp)"
                 } else {
                     source.sendMessage(
                         Component.text(
-                            "[Sentinel] Player '$targetInput' is not online on this proxy. Provide direct IP to check offline target.",
+                            "[Sentinel] Player '$targetInput' is not online on this proxy (or input is not a valid single IP). Provide a direct IP to check an offline target.",
                             NamedTextColor.RED
                         )
                     )
                     return
                 }
+            } else {
+                targetIp = SentinelListManager.normalizeIp(targetInput)
+                displayName = targetIp
             }
 
             source.sendMessage(Component.text("[Sentinel] Querying edge intelligence for $displayName...", NamedTextColor.GRAY))
             val finalDisplay = displayName
+            val cfg = plugin.sentinelConfig
             plugin.sentinelClient.evaluate(targetIp).thenAccept { verdict ->
+                val isThreat = verdict.isThreat(cfg.riskThreshold, cfg.allowGamingOptimizers)
                 val color = when {
-                    verdict.riskScore >= 80 -> NamedTextColor.RED
+                    isThreat || verdict.riskScore >= cfg.riskThreshold -> NamedTextColor.RED
                     verdict.riskScore >= 40 -> NamedTextColor.YELLOW
                     else -> NamedTextColor.GREEN
                 }
@@ -192,6 +206,9 @@ class SentinelVelocityCommand(private val plugin: SentinelVelocityPlugin) : Simp
                     source.sendMessage(Component.text("Reasons: ", NamedTextColor.GRAY).append(Component.text(verdict.reasons.joinToString(", "), NamedTextColor.WHITE)))
                 }
                 source.sendMessage(Component.text("---------------------------------------------", NamedTextColor.DARK_GRAY))
+            }.exceptionally { ex ->
+                source.sendMessage(Component.text("[Sentinel] Failed to check $finalDisplay: ${ex.message}", NamedTextColor.RED))
+                null
             }
             return
         }
@@ -200,6 +217,9 @@ class SentinelVelocityCommand(private val plugin: SentinelVelocityPlugin) : Simp
     }
 
     override fun suggest(invocation: SimpleCommand.Invocation): List<String> {
+        if (!hasPermission(invocation)) {
+            return emptyList()
+        }
         val args = invocation.arguments()
 
         if (args.isEmpty() || args.size == 1) {

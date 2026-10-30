@@ -5,6 +5,7 @@ import org.bukkit.event.EventHandler
 import org.bukkit.event.EventPriority
 import org.bukkit.event.Listener
 import org.bukkit.event.player.AsyncPlayerPreLoginEvent
+import java.util.concurrent.TimeUnit
 
 /**
  * Event listener handling asynchronous player pre-login connection verification on Paper/Spigot/Bukkit.
@@ -13,9 +14,10 @@ class PaperPreLoginListener(private val plugin: SentinelPaperPlugin) : Listener 
 
     @EventHandler(priority = EventPriority.LOWEST)
     fun onAsyncPlayerPreLogin(event: AsyncPlayerPreLoginEvent) {
+        if (event.loginResult != AsyncPlayerPreLoginEvent.Result.ALLOWED) return
         val playerName = event.name
         val address = event.address ?: return
-        val ip = address.hostAddress
+        val ip = address.hostAddress.substringBefore('%')
 
         // 1. Whitelist Check (Fastest Path - Bypasses edge API query)
         if (plugin.listManager.isWhitelisted(playerName, ip)) {
@@ -34,8 +36,9 @@ class PaperPreLoginListener(private val plugin: SentinelPaperPlugin) : Listener 
         val config = plugin.sentinelConfig
 
         try {
-            // Evaluate IP asynchronously against Sentinel Edge API
-            val verdict = plugin.sentinelClient.evaluate(ip).join()
+            // Evaluate IP asynchronously against Sentinel Edge API with bounded timeout
+            val verdict = plugin.sentinelClient.evaluate(ip)
+                .get(config.safeTimeoutMs + 1000L, TimeUnit.MILLISECONDS)
 
             val isThreat = verdict.isThreat(config.riskThreshold, config.allowGamingOptimizers)
 
@@ -43,12 +46,11 @@ class PaperPreLoginListener(private val plugin: SentinelPaperPlugin) : Listener 
                 val enforce = !config.isAuditMode
 
                 if (enforce && isThreat) {
-                    val isSuspectResidential = verdict.isSuspectResidentialTunnel()
-                    if (config.graduatedDefense && isSuspectResidential && !verdict.isHardThreat(config.riskThreshold, config.allowGamingOptimizers)) {
+                    if (config.graduatedDefense && !verdict.isHardThreat(config.riskThreshold, config.allowGamingOptimizers)) {
                         // Graduated Defense: Allow connection to protect legitimate players on shared mobile CGNAT pools, but alert staff
                         plugin.webhookNotifier.sendAlert(playerName, verdict, false)
                         plugin.logger.warning(
-                            "[Sentinel] GRADUATED DEFENSE: Flagged $playerName ($ip) - Suspect Residential Tunnel [Risk: ${verdict.riskScore}/100, Confidence: ${verdict.confidence}]. Connection allowed; alert dispatched."
+                            "[Sentinel] GRADUATED DEFENSE: Flagged $playerName ($ip) - ${verdict.threatType} [Risk: ${verdict.riskScore}/100, Confidence: ${verdict.confidence}]. Connection allowed; alert dispatched."
                         )
                     } else {
                         // Deterministic hard threat: Enforce kick
@@ -77,7 +79,7 @@ class PaperPreLoginListener(private val plugin: SentinelPaperPlugin) : Listener 
                 }
             }
         } catch (e: Exception) {
-            plugin.logger.severe("[Sentinel] Unexpected error evaluating $playerName ($ip): ${e.message}")
+            plugin.logger.severe("[Sentinel] Unexpected error evaluating $playerName ($ip): ${e.message ?: e.javaClass.simpleName}")
         }
     }
 }

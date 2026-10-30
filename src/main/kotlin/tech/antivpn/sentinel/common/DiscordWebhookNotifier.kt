@@ -30,6 +30,7 @@ class DiscordWebhookNotifier(
         .build()
 
     private val alertQueue = ConcurrentLinkedQueue<AlertItem>()
+    private val queuedCount = AtomicInteger(0)
     private val scheduler: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor { r ->
         val t = Thread(r, "Sentinel-Discord-Batcher")
         t.isDaemon = true
@@ -38,6 +39,8 @@ class DiscordWebhookNotifier(
 
     private val burstCounter = AtomicInteger(0)
     private var lastBurstReset = System.currentTimeMillis()
+    @Volatile
+    private var rateLimitUntil = 0L
 
     private data class AlertItem(
         val playerName: String?,
@@ -59,38 +62,77 @@ class DiscordWebhookNotifier(
             return CompletableFuture.completedFuture(null)
         }
 
+        var sendImmediately = false
         val now = System.currentTimeMillis()
         synchronized(this) {
-            if (now - lastBurstReset > 1000) {
+            if (now - lastBurstReset > 2000) {
                 burstCounter.set(0)
                 lastBurstReset = now
             }
+            if (now >= rateLimitUntil && burstCounter.get() < 2 && alertQueue.isEmpty()) {
+                burstCounter.incrementAndGet()
+                sendImmediately = true
+            } else if (queuedCount.get() < 2000) {
+                alertQueue.add(AlertItem(playerName, verdict, wasEnforced))
+                queuedCount.incrementAndGet()
+            }
         }
 
-        // If under normal rate (< 3 alerts/sec), send immediately for real-time responsiveness
-        if (burstCounter.incrementAndGet() <= 2 && alertQueue.isEmpty()) {
+        if (sendImmediately) {
             return dispatchSingleAlert(playerName, verdict, wasEnforced)
         }
-
-        // Under burst flood, queue for consolidated batching
-        alertQueue.add(AlertItem(playerName, verdict, wasEnforced))
         return CompletableFuture.completedFuture(null)
     }
 
-    @Synchronized
     private fun flushQueue() {
-        if (alertQueue.isEmpty()) return
-
         val drained = mutableListOf<AlertItem>()
-        var item: AlertItem?
-        while (alertQueue.poll().also { item = it } != null) {
-            item?.let { drained.add(it) }
-            if (drained.size >= 50) break
+        var canSendSingle = false
+
+        synchronized(this) {
+            val now = System.currentTimeMillis()
+            if (now < rateLimitUntil && !scheduler.isShutdown) {
+                return
+            }
+            if (alertQueue.isEmpty()) {
+                queuedCount.set(0)
+                return
+            }
+
+            var item: AlertItem?
+            while (alertQueue.poll().also { item = it } != null) {
+                queuedCount.updateAndGet { if (it > 0) it - 1 else 0 }
+                item?.let { drained.add(it) }
+                if (drained.size >= 250) break
+            }
+            if (alertQueue.isEmpty()) {
+                queuedCount.set(0)
+            }
+
+            if (drained.isEmpty()) return
+
+            if (now - lastBurstReset > 2000) {
+                burstCounter.set(0)
+                lastBurstReset = now
+            }
+            if (drained.size <= 2) {
+                if (burstCounter.get() + drained.size <= 2 || scheduler.isShutdown) {
+                    burstCounter.addAndGet(drained.size)
+                    canSendSingle = true
+                } else {
+                    for (item in drained) {
+                        if (queuedCount.get() < 2000) {
+                            alertQueue.add(item)
+                            queuedCount.incrementAndGet()
+                        }
+                    }
+                    return
+                }
+            } else {
+                burstCounter.incrementAndGet()
+            }
         }
 
-        if (drained.isEmpty()) return
-
-        if (drained.size <= 2) {
+        if (canSendSingle) {
             for (a in drained) {
                 dispatchSingleAlert(a.playerName, a.verdict, a.wasEnforced)
             }
@@ -105,20 +147,38 @@ class DiscordWebhookNotifier(
             payload.addProperty("username", "Sentinel Anti-VPN")
 
             val embed = JsonObject()
-            val titlePrefix = if (wasEnforced) "[SENTINEL ENFORCE]" else "[SENTINEL AUDIT]"
-            embed.addProperty("title", "$titlePrefix ${verdict.threatType} Flagged")
-            embed.addProperty("color", if (wasEnforced) 0xEF4444 else 0xF59E0B)
+            val isThreat = verdict.isThreat(config.riskThreshold, config.allowGamingOptimizers)
+            val isGraduatedAllow = isThreat && !wasEnforced && !config.isAuditMode
+            val titlePrefix = when {
+                wasEnforced -> "[SENTINEL ENFORCE]"
+                isGraduatedAllow -> "[SENTINEL GRADUATED]"
+                isThreat -> "[SENTINEL AUDIT]"
+                else -> "[SENTINEL ALLOW]"
+            }
+            val titleSuffix = if (isThreat) "Flagged" else "Verified"
+            embed.addProperty("title", "$titlePrefix ${verdict.threatType} $titleSuffix")
+            embed.addProperty("color", when {
+                wasEnforced -> 0xEF4444
+                isThreat -> 0xF59E0B
+                else -> 0x10B981
+            })
             embed.addProperty("timestamp", Instant.now().toString())
 
             val fields = JsonArray()
-            addField(fields, "Player", "`${playerName ?: "Unknown"}`", true)
+            addField(fields, "Player", "`${sanitizePlayerName(playerName)}`", true)
             addField(fields, "IP Address", "`${verdict.ip}`", true)
             addField(fields, "Risk Rating", "**${verdict.riskScore} / 100** (${getRiskSeverity(verdict.riskScore)})", true)
 
             val ispVal = "AS${verdict.asn} - ${verdict.provider} (${verdict.getFormattedLocation()})"
             addField(fields, "ISP & Network Details", ispVal, false)
             addField(fields, "Threat Classification", "${verdict.threatType} [Verdict: ${verdict.action}]", true)
-            addField(fields, "Action Taken", if (wasEnforced) "BLOCKED (Player Kicked)" else "AUDIT (Player Allowed - Dry Run Test)", true)
+            val actionTaken = when {
+                wasEnforced -> "BLOCKED (Player Kicked)"
+                isGraduatedAllow -> "GRADUATED DEFENSE (Player Allowed - Soft Alert)"
+                isThreat -> "AUDIT (Player Allowed - Dry Run Test)"
+                else -> "ALLOWED (Clean Connection)"
+            }
+            addField(fields, "Action Taken", actionTaken, true)
 
             val reasons = verdict.reasons
             if (reasons.isNotEmpty()) {
@@ -152,14 +212,24 @@ class DiscordWebhookNotifier(
             val payload = JsonObject()
             payload.addProperty("username", "Sentinel Security")
 
+            val enforcedCount = batch.count { it.wasEnforced }
+            val auditCount = batch.size - enforcedCount
+            val isMostlyEnforced = enforcedCount > 0
+
             val embed = JsonObject()
-            embed.addProperty("title", "[SENTINEL] High-Volume Threat Wave Neutralized")
-            embed.addProperty("description", "**${batch.size} malicious connections** were intercepted and blocked.")
-            embed.addProperty("color", 0xEF4444)
+            embed.addProperty(
+                "title",
+                if (isMostlyEnforced) "[SENTINEL] High-Volume Threat Wave Neutralized" else "[SENTINEL AUDIT] High-Volume Connection Wave Logged"
+            )
+            embed.addProperty(
+                "description",
+                "**${batch.size} connections** processed ($enforcedCount blocked, $auditCount allowed/audited)."
+            )
+            embed.addProperty("color", if (isMostlyEnforced) 0xEF4444 else 0xF59E0B)
             embed.addProperty("timestamp", Instant.now().toString())
 
             val fields = JsonArray()
-            addField(fields, "Attacks Intercepted", "**${batch.size} connections**", true)
+            addField(fields, "Connections Processed", "**${batch.size}** ($enforcedCount blocked)", true)
 
             val threatCounts = mutableMapOf<String, Int>()
             val samplePlayers = LinkedHashSet<String>()
@@ -168,7 +238,7 @@ class DiscordWebhookNotifier(
             for (item in batch) {
                 threatCounts[item.verdict.threatType] = (threatCounts[item.verdict.threatType] ?: 0) + 1
                 if (!item.playerName.isNullOrBlank() && samplePlayers.size < 8) {
-                    samplePlayers.add(item.playerName)
+                    samplePlayers.add("`${sanitizePlayerName(item.playerName)}`")
                 }
                 if (item.verdict.country.isNotBlank() && item.verdict.country != "ZZ") {
                     uniqueCountries.add(item.verdict.country)
@@ -179,14 +249,20 @@ class DiscordWebhookNotifier(
             for ((k, v) in threatCounts) {
                 threatsSummary.append("• **$k**: $v\n")
             }
-            addField(fields, "Threat Breakdown", threatsSummary.toString(), false)
+            val threatText = if (threatsSummary.isEmpty()) "None"
+            else if (threatsSummary.length > 1024) threatsSummary.substring(0, 1021) + "..."
+            else threatsSummary.toString()
+            addField(fields, "Threat Breakdown", threatText, false)
 
             if (samplePlayers.isNotEmpty()) {
                 addField(fields, "Sample Players", samplePlayers.joinToString(", "), false)
             }
 
             if (uniqueCountries.isNotEmpty()) {
-                addField(fields, "Origin Countries", uniqueCountries.joinToString(", "), true)
+                val countriesText = uniqueCountries.joinToString(", ").let {
+                    if (it.length > 1024) it.substring(0, 1021) + "..." else it
+                }
+                addField(fields, "Origin Countries", countriesText, true)
             }
 
             embed.add("fields", fields)
@@ -207,20 +283,30 @@ class DiscordWebhookNotifier(
     }
 
     private fun postWebhook(jsonPayload: String): CompletableFuture<Void> {
-        val request = HttpRequest.newBuilder()
-            .uri(URI.create(config.discordWebhookUrl))
-            .timeout(Duration.ofSeconds(4))
-            .header("Content-Type", "application/json")
-            .header("User-Agent", "Sentinel-Minecraft-Discord/1.0.0")
-            .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
-            .build()
+        val request = try {
+            HttpRequest.newBuilder()
+                .uri(URI.create(config.discordWebhookUrl.trim()))
+                .timeout(Duration.ofSeconds(4))
+                .header("Content-Type", "application/json")
+                .header("User-Agent", "Sentinel-Minecraft-Discord/2.0.0")
+                .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
+                .build()
+        } catch (e: Exception) {
+            errorLogger("[Sentinel] Invalid Discord webhook URL configured: ${e.message}")
+            return CompletableFuture.completedFuture(null)
+        }
 
         return httpClient.sendAsync(request, HttpResponse.BodyHandlers.discarding())
             .thenAccept { res ->
-                if (res.statusCode() >= 400) {
+                if (res.statusCode() == 429) {
+                    val retrySec = res.headers().firstValue("Retry-After").orElse("5").toDoubleOrNull() ?: 5.0
+                    rateLimitUntil = System.currentTimeMillis() + (retrySec * 1000).toLong().coerceIn(1000L, 60_000L)
+                    errorLogger("[Sentinel] Discord webhook rate-limited (HTTP 429); backing off for ${retrySec}s")
+                } else if (res.statusCode() >= 400) {
                     errorLogger("[Sentinel] Discord webhook rejected with HTTP status ${res.statusCode()}")
                 }
             }
+            .orTimeout(5, TimeUnit.SECONDS)
             .exceptionally { ex ->
                 errorLogger("[Sentinel] Failed to deliver Discord webhook: ${ex.message}")
                 null
@@ -235,6 +321,17 @@ class DiscordWebhookNotifier(
         fields.add(f)
     }
 
+    private fun sanitizePlayerName(name: String?): String {
+        if (name.isNullOrBlank()) return "Unknown"
+        return name.replace("`", "")
+            .replace("@", "")
+            .replace("\n", "")
+            .replace("\r", "")
+            .trim()
+            .take(32)
+            .ifEmpty { "Unknown" }
+    }
+
     private fun getRiskSeverity(score: Int): String {
         return when {
             score >= 90 -> "CRITICAL"
@@ -245,7 +342,12 @@ class DiscordWebhookNotifier(
     }
 
     fun shutdown() {
-        flushQueue()
         scheduler.shutdown()
+        var attempts = 0
+        while (!alertQueue.isEmpty() && attempts++ < 10) {
+            flushQueue()
+        }
+        alertQueue.clear()
+        queuedCount.set(0)
     }
 }

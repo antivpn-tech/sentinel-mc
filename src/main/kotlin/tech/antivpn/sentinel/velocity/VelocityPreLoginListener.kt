@@ -6,18 +6,28 @@ import com.velocitypowered.api.event.connection.PreLoginEvent
 import net.kyori.adventure.text.Component
 import net.kyori.adventure.text.format.NamedTextColor
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
+import java.util.concurrent.TimeUnit
 
 /**
  * High-throughput asynchronous PreLoginEvent handler for Velocity proxy networks.
  */
 class VelocityPreLoginListener(private val plugin: SentinelVelocityPlugin) {
 
+    companion object {
+        private val LEGACY_SERIALIZER = LegacyComponentSerializer.builder()
+            .character('&')
+            .hexColors()
+            .useUnusualXRepeatedCharacterHexFormat()
+            .build()
+    }
+
     @Subscribe
     fun onPreLogin(event: PreLoginEvent): EventTask? {
+        if (!event.result.isAllowed) return null
         val username = event.username
         val remoteAddress = event.connection.remoteAddress ?: return null
         val address = remoteAddress.address ?: return null
-        val ip = address.hostAddress
+        val ip = address.hostAddress.substringBefore('%')
 
         // 1. Whitelist Check (Fastest Path - Bypasses edge API query)
         if (plugin.listManager.isWhitelisted(username, ip)) {
@@ -35,55 +45,62 @@ class VelocityPreLoginListener(private val plugin: SentinelVelocityPlugin) {
 
         val config = plugin.sentinelConfig
 
-        return EventTask.async {
-            try {
-                // Non-blocking asynchronous edge query
-                val verdict = plugin.sentinelClient.evaluate(ip).join()
-
-                val isThreat = verdict.isThreat(config.riskThreshold, config.allowGamingOptimizers)
-
-                if (isThreat || !config.discordNotifyOnlyOnThreat) {
-                    val enforce = !config.isAuditMode
-
-                    if (enforce && isThreat) {
-                        val isSuspectResidential = verdict.isSuspectResidentialTunnel()
-                        if (config.graduatedDefense && isSuspectResidential && !verdict.isHardThreat(config.riskThreshold, config.allowGamingOptimizers)) {
-                            // Graduated Defense: Allow connection to protect legitimate players on shared mobile CGNAT pools, but alert staff
-                            plugin.webhookNotifier.sendAlert(username, verdict, false)
-                            plugin.logger.warn(
-                                "[Sentinel] GRADUATED DEFENSE: Flagged {} ({}) - Suspect Residential Tunnel [Risk: {}/100, Confidence: {}]. Connection allowed; alert dispatched.",
-                                username, ip, verdict.riskScore, verdict.confidence
-                            )
-                        } else {
-                            // Deterministic hard threat: Enforce kick
-                            plugin.webhookNotifier.sendAlert(username, verdict, true)
-                            val formattedKick = config.buildEnforcementKickMessage(
-                                threat = verdict.threatType,
-                                risk = verdict.riskScore,
-                                ip = ip,
-                                player = username
-                            )
-                            val kickComponent = LegacyComponentSerializer.legacyAmpersand().deserialize(formattedKick)
-
-                            event.result = PreLoginEvent.PreLoginComponentResult.denied(kickComponent)
-                            plugin.logger.warn(
-                                "[Sentinel] ENFORCE: Blocked {} ({}) - Threat: {} [Risk: {}/100]",
-                                username, ip, verdict.threatType, verdict.riskScore
-                            )
+        return EventTask.withContinuation { continuation ->
+            plugin.sentinelClient.evaluate(ip)
+                .orTimeout(config.safeTimeoutMs + 1000L, TimeUnit.MILLISECONDS)
+                .whenComplete { verdict, ex ->
+                    try {
+                        if (ex != null || verdict == null) {
+                            plugin.logger.error("[Sentinel] Velocity pre-login evaluation failure for {} ({}): {}", username, ip, ex?.message ?: "timeout")
+                            return@whenComplete
                         }
-                    } else {
-                        plugin.webhookNotifier.sendAlert(username, verdict, false)
-                        if (isThreat) {
-                            plugin.logger.info(
-                                "[Sentinel] AUDIT: Flagged {} ({}) - Threat: {} [Risk: {}/100] (Player Allowed - Audit Mode)",
-                                username, ip, verdict.threatType, verdict.riskScore
-                            )
+
+                        val isThreat = verdict.isThreat(config.riskThreshold, config.allowGamingOptimizers)
+
+                        if (isThreat || !config.discordNotifyOnlyOnThreat) {
+                            val enforce = !config.isAuditMode
+
+                            if (enforce && isThreat) {
+                                if (config.graduatedDefense && !verdict.isHardThreat(config.riskThreshold, config.allowGamingOptimizers)) {
+                                    // Graduated Defense: Allow connection to protect legitimate players on shared mobile CGNAT pools, but alert staff
+                                    plugin.webhookNotifier.sendAlert(username, verdict, false)
+                                    plugin.logger.warn(
+                                        "[Sentinel] GRADUATED DEFENSE: Flagged {} ({}) - {} [Risk: {}/100, Confidence: {}]. Connection allowed; alert dispatched.",
+                                        username, ip, verdict.threatType, verdict.riskScore, verdict.confidence
+                                    )
+                                } else {
+                                    // Deterministic hard threat: Enforce kick
+                                    plugin.webhookNotifier.sendAlert(username, verdict, true)
+                                    val formattedKick = config.buildEnforcementKickMessage(
+                                        threat = verdict.threatType,
+                                        risk = verdict.riskScore,
+                                        ip = ip,
+                                        player = username
+                                    ).replace('§', '&')
+                                    val kickComponent = LEGACY_SERIALIZER.deserialize(formattedKick)
+
+                                    event.result = PreLoginEvent.PreLoginComponentResult.denied(kickComponent)
+                                    plugin.logger.warn(
+                                        "[Sentinel] ENFORCE: Blocked {} ({}) - Threat: {} [Risk: {}/100]",
+                                        username, ip, verdict.threatType, verdict.riskScore
+                                    )
+                                }
+                            } else {
+                                plugin.webhookNotifier.sendAlert(username, verdict, false)
+                                if (isThreat) {
+                                    plugin.logger.info(
+                                        "[Sentinel] AUDIT: Flagged {} ({}) - Threat: {} [Risk: {}/100] (Player Allowed - Audit Mode)",
+                                        username, ip, verdict.threatType, verdict.riskScore
+                                    )
+                                }
+                            }
                         }
+                    } catch (e: Exception) {
+                        plugin.logger.error("[Sentinel] Velocity pre-login evaluation failure for {} ({}): {}", username, ip, e.message ?: e.javaClass.simpleName)
+                    } finally {
+                        continuation.resume()
                     }
                 }
-            } catch (e: Exception) {
-                plugin.logger.error("[Sentinel] Velocity pre-login evaluation failure for {} ({}): {}", username, ip, e.message)
-            }
         }
     }
 }

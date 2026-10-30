@@ -12,12 +12,16 @@ import java.nio.file.Files
  */
 class SentinelBungeePlugin : Plugin() {
 
+    @Volatile
     lateinit var sentinelConfig: SentinelConfig
         private set
+    @Volatile
     lateinit var sentinelClient: SentinelClient
         private set
+    @Volatile
     lateinit var webhookNotifier: DiscordWebhookNotifier
         private set
+    @Volatile
     lateinit var listManager: SentinelListManager
         private set
 
@@ -54,7 +58,7 @@ class SentinelBungeePlugin : Plugin() {
 
     override fun onDisable() {
         if (::sentinelClient.isInitialized) {
-            sentinelClient.clearCache()
+            sentinelClient.shutdown()
         }
         if (::webhookNotifier.isInitialized) {
             webhookNotifier.shutdown()
@@ -63,6 +67,8 @@ class SentinelBungeePlugin : Plugin() {
     }
 
     fun loadConfiguration() {
+        val oldClient = if (::sentinelClient.isInitialized) sentinelClient else null
+        val oldWebhook = if (::webhookNotifier.isInitialized) webhookNotifier else null
         try {
             if (!dataFolder.exists()) {
                 dataFolder.mkdirs()
@@ -78,38 +84,77 @@ class SentinelBungeePlugin : Plugin() {
             val props = mutableMapOf<String, String>()
             if (Files.exists(configPath)) {
                 Files.newBufferedReader(configPath).use { reader ->
-                    var line: String?
+                    var rawLine: String?
                     var currentSection = ""
                     var currentKey: String? = null
-                    while (reader.readLine().also { line = it } != null) {
-                        val trimmed = line!!.trim()
+                    var blockScalarKey: String? = null
+                    var blockScalarBaseIndent = -1
+                    var blockScalarFold = false
+                    while (reader.readLine().also { rawLine = it } != null) {
+                        val line = rawLine!!
+                        val trimmed = line.trim()
+                        val indent = line.indexOfFirst { !it.isWhitespace() }.let { if (it < 0) 0 else it }
+                        val isIndented = indent > 0
+
+                        if (blockScalarKey != null) {
+                            if (trimmed.isEmpty()) {
+                                val existing = props[blockScalarKey]
+                                if (!existing.isNullOrEmpty()) {
+                                    props[blockScalarKey!!] = "$existing\n"
+                                }
+                                continue
+                            }
+                            if (indent > blockScalarBaseIndent) {
+                                val existing = props[blockScalarKey]
+                                props[blockScalarKey!!] = when {
+                                    existing.isNullOrEmpty() -> trimmed
+                                    blockScalarFold && existing.endsWith("\n") -> "$existing$trimmed"
+                                    blockScalarFold -> "$existing $trimmed"
+                                    else -> "$existing\n$trimmed"
+                                }
+                                continue
+                            } else {
+                                blockScalarKey = null
+                                blockScalarBaseIndent = -1
+                            }
+                        }
+
                         if (trimmed.isEmpty() || trimmed.startsWith("#")) continue
 
-                        if (trimmed.endsWith(":") && !trimmed.contains(" ")) {
-                            currentSection = trimmed.substring(0, trimmed.length - 1) + "."
-                            currentKey = null
+                        if (trimmed.startsWith("-") && currentKey != null) {
+                            val item = stripYamlValue(trimmed.substring(1).trim())
+                            val existing = props[currentKey]
+                            props[currentKey] = if (existing == null) item else "$existing\n$item"
                             continue
                         }
 
-                        if (trimmed.startsWith("-") && currentKey != null) {
-                            var item = trimmed.substring(1).trim()
-                            if ((item.startsWith("\"") && item.endsWith("\"")) || (item.startsWith("'") && item.endsWith("'"))) {
-                                item = item.substring(1, item.length - 1)
-                            }
-                            val existing = props[currentKey]
-                            props[currentKey] = if (existing.isNullOrEmpty()) item else "$existing\n$item"
-                            continue
+                        if (!isIndented) {
+                            currentSection = ""
                         }
 
                         val colonIdx = trimmed.indexOf(':')
                         if (colonIdx > 0) {
                             val key = trimmed.substring(0, colonIdx).trim()
-                            var value = trimmed.substring(colonIdx + 1).trim()
-                            if ((value.startsWith("\"") && value.endsWith("\"")) || (value.startsWith("'") && value.endsWith("'"))) {
-                                value = value.substring(1, value.length - 1)
+                            val rawVal = trimmed.substring(colonIdx + 1).trim()
+                            val rawNoComment = rawVal.substringBefore(" #").substringBefore("\t#").trim()
+                            if (rawNoComment == "|" || rawNoComment == "|-" || rawNoComment == ">" || rawNoComment == ">-") {
+                                currentKey = currentSection + key
+                                blockScalarKey = currentKey
+                                blockScalarBaseIndent = indent
+                                blockScalarFold = rawNoComment.startsWith(">")
+                                props[currentKey] = ""
+                            } else if (rawVal.isEmpty() || rawVal.startsWith("#")) {
+                                if (!isIndented) {
+                                    currentSection = "$key."
+                                    currentKey = null
+                                } else {
+                                    currentKey = currentSection + key
+                                }
+                            } else {
+                                val value = stripYamlValue(rawVal)
+                                currentKey = currentSection + key
+                                props[currentKey] = value
                             }
-                            currentKey = currentSection + key
-                            props[currentKey] = value
                         } else {
                             currentKey = null
                         }
@@ -119,12 +164,12 @@ class SentinelBungeePlugin : Plugin() {
 
             val endpoint = props["api.endpoint"] ?: "https://api.antivpn.tech/v1/check"
             val licenseKey = props["api.license-key"] ?: "stl_live_your_api_key_here"
-            val timeoutMs = props["api.timeout-ms"]?.toIntOrNull() ?: 2500
+            val timeoutMs = (props["api.timeout-ms"]?.toIntOrNull() ?: 2500).coerceIn(500, 30_000)
             val mode = props["mode"] ?: "ENFORCE"
-            val riskThreshold = props["risk-threshold"]?.toIntOrNull() ?: 80
+            val riskThreshold = (props["risk-threshold"]?.toIntOrNull() ?: 80).coerceIn(0, 100)
             val allowGaming = props["allow-gaming-optimizers"]?.toBooleanStrictOrNull() ?: true
             val graduatedDefense = props["graduated-defense"]?.toBooleanStrictOrNull() ?: true
-            val cacheMinutes = props["cache-duration-minutes"]?.toIntOrNull() ?: 30
+            val cacheMinutes = (props["cache-duration-minutes"]?.toIntOrNull() ?: 30).coerceAtLeast(0)
             val discordEnabled = props["discord.enabled"]?.toBooleanStrictOrNull() ?: true
             val webhookUrl = props["discord.webhook-url"] ?: ""
             val notifyOnlyThreat = props["discord.notify-only-on-threat"]?.toBooleanStrictOrNull() ?: true
@@ -168,12 +213,63 @@ class SentinelBungeePlugin : Plugin() {
             } else {
                 this.listManager.load()
             }
+            oldClient?.shutdown()
+            oldWebhook?.shutdown()
         } catch (e: Exception) {
             logger.severe("[Sentinel] Failed to load BungeeCord configuration: ${e.message}")
-            this.sentinelConfig = SentinelConfig.createDefault()
-            this.sentinelClient = SentinelClient(this.sentinelConfig, { logger.info(it) }, { logger.warning(it) })
-            this.webhookNotifier = DiscordWebhookNotifier(this.sentinelConfig) { logger.warning(it) }
-            this.listManager = SentinelListManager(dataFolder.toPath(), { logger.info(it) }, { logger.warning(it) })
+            if (::sentinelClient.isInitialized && sentinelClient !== oldClient) sentinelClient.shutdown()
+            if (::webhookNotifier.isInitialized && webhookNotifier !== oldWebhook) webhookNotifier.shutdown()
+            if (oldClient != null && oldWebhook != null && ::sentinelConfig.isInitialized) {
+                this.sentinelClient = oldClient
+                this.webhookNotifier = oldWebhook
+                logger.warning("[Sentinel] Retaining previous active configuration after reload error.")
+            } else {
+                this.sentinelConfig = SentinelConfig.createDefault()
+                this.sentinelClient = SentinelClient(this.sentinelConfig, { logger.info(it) }, { logger.warning(it) })
+                this.webhookNotifier = DiscordWebhookNotifier(this.sentinelConfig) { logger.warning(it) }
+                this.listManager = SentinelListManager(dataFolder.toPath(), { logger.info(it) }, { logger.warning(it) })
+            }
         }
+    }
+
+    private fun stripYamlValue(raw: String): String {
+        val trimmed = raw.trim()
+        if (trimmed.startsWith("\"")) {
+            var i = 1
+            val sb = StringBuilder()
+            while (i < trimmed.length) {
+                val c = trimmed[i]
+                if (c == '\\' && i + 1 < trimmed.length && (trimmed[i + 1] == '"' || trimmed[i + 1] == '\\')) {
+                    sb.append(trimmed[i + 1])
+                    i += 2
+                    continue
+                }
+                if (c == '"') {
+                    return sb.toString()
+                }
+                sb.append(c)
+                i++
+            }
+            return sb.toString()
+        }
+        if (trimmed.startsWith("'")) {
+            var i = 1
+            val sb = StringBuilder()
+            while (i < trimmed.length) {
+                val c = trimmed[i]
+                if (c == '\'') {
+                    if (i + 1 < trimmed.length && trimmed[i + 1] == '\'') {
+                        sb.append('\'')
+                        i += 2
+                        continue
+                    }
+                    return sb.toString()
+                }
+                sb.append(c)
+                i++
+            }
+            return sb.toString()
+        }
+        return trimmed.substringBefore(" #").substringBefore("\t#").trim()
     }
 }

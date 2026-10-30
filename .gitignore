@@ -5,6 +5,7 @@ target/
 .vscode/
 .DS_Store
 *.log
+*.txt
 .wrangler/
 
 # Agent and internal working documents

@@ -38,7 +38,10 @@ data class SentinelVerdict(
         if (!allowGamingOptimizers && (isGamingOptimizer || isPrivacyRelay)) {
             return true
         }
-        return action.equals("BLOCK", ignoreCase = true) || riskScore >= threshold || isVpn
+        return action.equals("BLOCK", ignoreCase = true) ||
+               riskScore >= threshold ||
+               isVpn ||
+               isSuspectResidentialTunnel()
     }
 
     /**
@@ -55,9 +58,6 @@ data class SentinelVerdict(
         if (!allowGamingOptimizers && (isGamingOptimizer || isPrivacyRelay)) {
             return true
         }
-        if (action.equals("BLOCK", ignoreCase = true)) {
-            return true
-        }
         if (reasonCodes.contains("CARRIER_COMMERCIAL_VPN") ||
             reasonCodes.contains("HOSTING_INFRASTRUCTURE_MATCH") ||
             reasonCodes.contains("TOR_EXIT_NODE")) {
@@ -66,6 +66,9 @@ data class SentinelVerdict(
         // Suspect residential tunnels require graduated defense, not immediate hard-block
         if (isSuspectResidentialTunnel()) {
             return false
+        }
+        if (action.equals("BLOCK", ignoreCase = true)) {
+            return true
         }
         // High confidence threshold check
         return isVpn && riskScore >= threshold && (confidence >= 0.90 || confidence == 0.0)
@@ -78,7 +81,9 @@ data class SentinelVerdict(
      */
     fun isSuspectResidentialTunnel(): Boolean {
         return reasonCodes.contains("RESIDENTIAL_TUNNEL_PROXY") ||
-               (threatType.contains("Residential", ignoreCase = true) && riskScore >= 65)
+               (threatType.contains("Residential", ignoreCase = true) &&
+                !threatType.contains("Clean", ignoreCase = true) &&
+                riskScore >= 65)
     }
 
     /**

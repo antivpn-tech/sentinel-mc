@@ -55,6 +55,10 @@ class SentinelBungeeCommand(private val plugin: SentinelBungeePlugin) :
 
             if (args[1].equals("add", ignoreCase = true) && args.size >= 3) {
                 val target = args[2]
+                if (!SentinelListManager.isValidTarget(target)) {
+                    sender.sendMessage(TextComponent("${ChatColor.RED}[Sentinel] '$target' is not a valid IP address, CIDR subnet, or Minecraft username."))
+                    return
+                }
                 val added = plugin.listManager.addWhitelist(target)
                 if (added) {
                     sender.sendMessage(TextComponent("${ChatColor.GREEN}[Sentinel] Added '$target' to the whitelist."))
@@ -94,6 +98,10 @@ class SentinelBungeeCommand(private val plugin: SentinelBungeePlugin) :
 
             if (args[1].equals("add", ignoreCase = true) && args.size >= 3) {
                 val target = args[2]
+                if (!SentinelListManager.isValidTarget(target)) {
+                    sender.sendMessage(TextComponent("${ChatColor.RED}[Sentinel] '$target' is not a valid IP address, CIDR subnet, or Minecraft username."))
+                    return
+                }
                 val added = plugin.listManager.addBlacklist(target)
                 if (added) {
                     sender.sendMessage(TextComponent("${ChatColor.RED}[Sentinel] Added '$target' to the blacklist."))
@@ -120,29 +128,35 @@ class SentinelBungeeCommand(private val plugin: SentinelBungeePlugin) :
 
         if (args[0].equals("check", ignoreCase = true) && args.size >= 2) {
             val targetInput = args[1]
-            var targetIp = targetInput
-            var displayName = targetInput
+            var targetIp: String
+            var displayName: String
 
-            if (!SentinelListManager.isIpAddress(targetInput)) {
+            if (!SentinelListManager.isSingleIpAddress(targetInput)) {
                 val onlinePlayer = plugin.proxy.getPlayer(targetInput)
-                if (onlinePlayer != null && onlinePlayer.address != null) {
-                    targetIp = onlinePlayer.address.address.hostAddress
+                val inetAddr = (onlinePlayer?.socketAddress as? java.net.InetSocketAddress)?.address
+                if (onlinePlayer != null && inetAddr != null) {
+                    targetIp = inetAddr.hostAddress.substringBefore('%')
                     displayName = "${onlinePlayer.name} ($targetIp)"
                 } else {
                     sender.sendMessage(
                         TextComponent(
-                            "${ChatColor.RED}[Sentinel] Player '$targetInput' is not online on this proxy. Provide direct IP to check offline target."
+                            "${ChatColor.RED}[Sentinel] Player '$targetInput' is not online on this proxy (or input is not a valid single IP). Provide a direct IP to check an offline target."
                         )
                     )
                     return
                 }
+            } else {
+                targetIp = SentinelListManager.normalizeIp(targetInput)
+                displayName = targetIp
             }
 
             sender.sendMessage(TextComponent("${ChatColor.GRAY}[Sentinel] Querying edge intelligence for $displayName..."))
             val finalDisplay = displayName
+            val cfg = plugin.sentinelConfig
             plugin.sentinelClient.evaluate(targetIp).thenAccept { verdict ->
+                val isThreat = verdict.isThreat(cfg.riskThreshold, cfg.allowGamingOptimizers)
                 val color = when {
-                    verdict.riskScore >= 80 -> ChatColor.RED
+                    isThreat || verdict.riskScore >= cfg.riskThreshold -> ChatColor.RED
                     verdict.riskScore >= 40 -> ChatColor.YELLOW
                     else -> ChatColor.GREEN
                 }
@@ -157,6 +171,9 @@ class SentinelBungeeCommand(private val plugin: SentinelBungeePlugin) :
                     sender.sendMessage(TextComponent("${ChatColor.GRAY}Reasons: ${ChatColor.WHITE}${verdict.reasons.joinToString(", ")}"))
                 }
                 sender.sendMessage(TextComponent("${ChatColor.DARK_GRAY}---------------------------------------------"))
+            }.exceptionally { ex ->
+                sender.sendMessage(TextComponent("${ChatColor.RED}[Sentinel] Failed to check $finalDisplay: ${ex.message}"))
+                null
             }
             return
         }

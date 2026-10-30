@@ -18,17 +18,36 @@ data class SentinelConfig(
     val discordServerName: String = "Minecraft Network",
     val kickMessage: String = "&7VPN / Proxy traffic is restricted on this server.\n&8Threat: &f%threat% &7| &8Risk: &f%risk%/100\n&7Join our Discord (&fhttps://discord.gg/yourlink&7) to request VPN access."
 ) {
+    val safeTimeoutMs: Long
+        get() = timeoutMs.toLong().coerceIn(500L, 30_000L)
+
     val isAuditMode: Boolean
-        get() = mode.equals("AUDIT", ignoreCase = true)
+        get() = mode.trim().equals("AUDIT", ignoreCase = true)
 
     val isDiscordConfigured: Boolean
         get() = discordEnabled && discordWebhookUrl.isNotBlank()
 
     companion object {
-        const val FORCED_KICK_HEADER = "&9&lSentinel Protection"
+        // Clean slight cyan gradient (#22D3EE -> #0891B2) in universal &x hex format
+        const val FORCED_KICK_HEADER =
+            "&x&2&2&d&3&e&e&lS&x&2&0&c&f&e&b&le&x&1&f&c&b&e&7&ln&x&1&d&c&7&e&4&lt&x&1&c&c&3&e&0&li&x&1&a&b&f&d&d&ln&x&1&9&b&b&d&9&le&x&1&7&b&7&d&6&ll " +
+            "&x&1&5&b&3&d&2&lP&x&1&4&a&f&c&f&lr&x&1&2&a&b&c&b&lo&x&1&1&a&7&c&8&lt&x&0&f&a&3&c&4&le&x&0&e&9&f&c&1&lc&x&0&c&9&b&b&d&lt&x&0&b&9&7&b&a&li&x&0&9&9&3&b&6&lo&x&0&8&9&1&b&2&ln"
+
+        private val HEX_SHORT_REGEX = Regex("""[&§]#([0-9a-fA-F]{6})""")
 
         @JvmStatic
         fun createDefault(): SentinelConfig = SentinelConfig()
+
+        /**
+         * Converts shorthand &#RRGGBB hex codes into universal &x&R&R&G&G&B&B format.
+         */
+        @JvmStatic
+        fun translateHexCodes(input: String): String {
+            return HEX_SHORT_REGEX.replace(input) { match ->
+                val hex = match.groupValues[1].lowercase()
+                "&x&${hex[0]}&${hex[1]}&${hex[2]}&${hex[3]}&${hex[4]}&${hex[5]}"
+            }
+        }
 
         /**
          * Normalizes newline escape sequences (\r\n, literal \n, /n, /N) to standard LF (\n),
@@ -39,15 +58,18 @@ data class SentinelConfig(
             if (input.isEmpty()) return input
 
             // Protect URLs and discord invite links from /n replacement
-            val urlRegex = Regex("""(?:https?://|www\.|discord\.gg/)[^\s)\]">]+""", RegexOption.IGNORE_CASE)
+            val urlRegex = Regex("""(?:https?://|www\.|[a-zA-Z0-9-]+\.[a-zA-Z]{2,}/)[^\s)\]"'\\>&§]+""", RegexOption.IGNORE_CASE)
             val urls = mutableListOf<String>()
             val placeholderPrefix = "___SENTINEL_URL_"
             val placeholderSuffix = "___"
 
             val masked = urlRegex.replace(input) { match ->
+                val rawUrl = match.value
+                val hasTrailingSlashN = rawUrl.endsWith("/n", ignoreCase = true)
+                val cleanUrl = if (hasTrailingSlashN) rawUrl.dropLast(2) else rawUrl
                 val idx = urls.size
-                urls.add(match.value)
-                "$placeholderPrefix$idx$placeholderSuffix"
+                urls.add(cleanUrl)
+                if (hasTrailingSlashN) "$placeholderPrefix$idx$placeholderSuffix/n" else "$placeholderPrefix$idx$placeholderSuffix"
             }
 
             var result = masked
@@ -76,20 +98,29 @@ data class SentinelConfig(
         ip: String = "",
         player: String = ""
     ): String {
-        var body = kickMessage
+        var body = normalizeNewlines(kickMessage).trim()
+
+        // Strip legacy or redundant Sentinel Protection / Anti-VPN headers from upgraded configs
+        val firstNewline = body.indexOf('\n')
+        val firstLine = if (firstNewline >= 0) body.substring(0, firstNewline) else body
+        val plainFirstLine = firstLine
+            .replace(Regex("""[&§]#[0-9a-fA-F]{6}"""), "")
+            .replace(Regex("""[&§][0-9a-fk-orxA-FK-ORX]"""), "")
+            .replace(Regex("""[\[\]\-:]"""), "")
+            .trim()
+
+        if (plainFirstLine.equals("Sentinel Protection", ignoreCase = true) ||
+            plainFirstLine.equals("Sentinel AntiVPN", ignoreCase = true) ||
+            plainFirstLine.equals("Sentinel Anti VPN", ignoreCase = true)
+        ) {
+            body = if (firstNewline >= 0) body.substring(firstNewline + 1).trimStart('\n', '\r', ' ') else ""
+        }
+
+        body = translateHexCodes(body)
             .replace("%threat%", threat)
             .replace("%risk%", risk.toString())
             .replace("%ip%", ip)
             .replace("%player%", player)
-
-        body = normalizeNewlines(body).trim()
-
-        // Strip legacy or redundant Sentinel Protection headers from upgraded configs
-        val legacyHeaderRegex = Regex(
-            """^(?:&[0-9a-fk-orA-FK-OR§]|\[|\s)*Sentinel Protection(?:\])?(?:\s*[:\-])?\s*(?:\n|\Z)""",
-            RegexOption.IGNORE_CASE
-        )
-        body = legacyHeaderRegex.replace(body, "").trimStart('\n', '\r', ' ')
 
         return if (body.isEmpty()) {
             FORCED_KICK_HEADER

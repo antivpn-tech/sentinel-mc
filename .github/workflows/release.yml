@@ -51,11 +51,12 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v1.0.0' }}
           files: ${{ steps.locate_jar.outputs.jar_path }}
-          name: "Sentinel Minecraft ${{ github.ref_name }}"
+          name: "Sentinel Minecraft ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v1.0.0' }}"
           generate_release_notes: false
           body: |
-            ## Sentinel Minecraft Connector ${{ github.ref_name }}
+            ## Sentinel Minecraft Connector ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v1.0.0' }}
 
             Official universal Kotlin plugin connecting Minecraft networks to the Sentinel Edge Intelligence Network ([antivpn.tech](https://antivpn.tech)).
 
@@ -72,7 +73,7 @@ jobs:
             - **Zero Dependencies**: Kotlin standard library is fully shaded and isolated.
 
             ### Installation
-            1. Download `Sentinel-Minecraft-${{ github.ref_name }}.jar` below.
+            1. Download the `Sentinel-Minecraft-*.jar` release binary below.
             2. Place into your server or proxy `/plugins/` directory.
             3. Claim your license key at [antivpn.tech](https://antivpn.tech) and add it to `config.yml`.
             4. Execute `/sentinel reload`.

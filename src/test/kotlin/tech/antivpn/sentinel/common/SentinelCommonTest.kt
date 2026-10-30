@@ -44,8 +44,13 @@ class SentinelCommonTest {
             isGamingOptimizer = false
         )
         assertTrue(residentialVerdict.isSuspectResidentialTunnel())
+        assertTrue(residentialVerdict.isThreat(threshold = 80, allowGamingOptimizers = true))
         // In default enforce mode, suspect residential proxy is not a hard threat (graduated defense applies)
         assertFalse(residentialVerdict.isHardThreat(threshold = 80, allowGamingOptimizers = true))
+
+        val highRiskResidentialVerdict = residentialVerdict.copy(action = "BLOCK", riskScore = 88)
+        assertTrue(highRiskResidentialVerdict.isThreat(threshold = 80, allowGamingOptimizers = true))
+        assertFalse(highRiskResidentialVerdict.isHardThreat(threshold = 80, allowGamingOptimizers = true))
 
         val gamingVerdict = SentinelVerdict(
             ip = "2.2.2.2",
@@ -139,10 +144,21 @@ class SentinelCommonTest {
         assertTrue(manager.isBlacklisted("badplayer", null))
         assertTrue(manager.isBlacklisted(null, "9.9.9.9"))
 
+        // CIDR subnet support
+        assertTrue(manager.addWhitelist("198.51.100.0/24"))
+        assertTrue(manager.isWhitelisted(null, "198.51.100.42"))
+        assertFalse(manager.isWhitelisted(null, "198.51.101.42"))
+
+        assertTrue(manager.addBlacklist("2001:db8:abcd::/48"))
+        assertTrue(manager.isBlacklisted(null, "2001:db8:abcd:0001::1"))
+        assertFalse(manager.isBlacklisted(null, "2001:db8:abce:0001::1"))
+
         // Reload from disk to verify JSON persistence
         val reloaded = SentinelListManager(tempDir)
         assertTrue(reloaded.isWhitelisted("notch", "1.2.3.4"))
+        assertTrue(reloaded.isWhitelisted(null, "198.51.100.99"))
         assertTrue(reloaded.isBlacklisted("badplayer", "9.9.9.9"))
+        assertTrue(reloaded.isBlacklisted(null, "2001:db8:abcd::5"))
     }
 
     @Test
@@ -156,6 +172,14 @@ class SentinelCommonTest {
             "https://example.com/api/batch",
             client.resolveBatchEndpoint("https://example.com/api/check")
         )
+        assertEquals(
+            "https://api.antivpn.tech/v1/batch",
+            client.resolveBatchEndpoint("https://api.antivpn.tech/v1/check/?timeout=1000")
+        )
+        assertTrue(SentinelListManager.isSingleIpAddress("1.2.3.4"))
+        assertTrue(SentinelListManager.isSingleIpAddress("[2001:db8::1]"))
+        assertFalse(SentinelListManager.isSingleIpAddress("1.2.3.0/24"))
+        assertTrue(SentinelListManager.isIpAddress("1.2.3.0/24"))
 
         val batchJson = """
             {
@@ -183,6 +207,26 @@ class SentinelCommonTest {
             }
         """.trimIndent()
 
+        val ipv6BatchJson = """
+            {
+                "count": 1,
+                "results": [
+                    {
+                        "ip": "2001:db8::1",
+                        "action": "BLOCK",
+                        "risk_score": 95,
+                        "confidence": 0.99,
+                        "threat_type": "Commercial VPN",
+                        "is_vpn": true,
+                        "reason_codes": ["CARRIER_COMMERCIAL_VPN"]
+                    }
+                ]
+            }
+        """.trimIndent()
+        val parsedIpv6 = client.parseBatchVerdicts(listOf("2001:db8:0:0:0:0:0:1"), ipv6BatchJson)
+        assertEquals("BLOCK", parsedIpv6["2001:db8:0:0:0:0:0:1"]?.action)
+        assertEquals(95, parsedIpv6["2001:db8:0:0:0:0:0:1"]?.riskScore)
+
         val parsed = client.parseBatchVerdicts(listOf("185.220.101.1", "8.8.8.8", "9.9.9.9"), batchJson)
         assertEquals(3, parsed.size)
         assertEquals("BLOCK", parsed["185.220.101.1"]?.action)
@@ -198,7 +242,7 @@ class SentinelCommonTest {
     }
 
     @Test
-    fun testForcedBlueKickHeader() {
+    fun testForcedCyanGradientKickHeader() {
         val config = SentinelConfig.createDefault()
         val message = config.buildEnforcementKickMessage(
             threat = "Commercial VPN",
@@ -207,11 +251,10 @@ class SentinelCommonTest {
             player = "TestPlayer"
         )
 
-        // Line 1 must be strictly forced as &9&lSentinel Protection (Blue & Bold)
+        // Line 1 must be strictly forced as the cyan gradient Sentinel Protection header
         val lines = message.split("\n")
         assertTrue(lines.isNotEmpty())
         assertEquals(SentinelConfig.FORCED_KICK_HEADER, lines[0])
-        assertEquals("&9&lSentinel Protection", lines[0])
         assertTrue(lines[1].contains("VPN / Proxy traffic is restricted on this server."))
         assertTrue(lines[2].contains("Commercial VPN"))
         assertTrue(lines[2].contains("90/100"))
@@ -223,7 +266,6 @@ class SentinelCommonTest {
         val blankConfig = SentinelConfig(kickMessage = "   ")
         val message = blankConfig.buildEnforcementKickMessage("Tor Exit Node", 99, "5.6.7.8", "BadActor")
         assertEquals(SentinelConfig.FORCED_KICK_HEADER, message)
-        assertEquals("&9&lSentinel Protection", message)
     }
 
     @Test
