@@ -9,6 +9,7 @@ import com.velocitypowered.api.plugin.Plugin
 import com.velocitypowered.api.plugin.annotation.DataDirectory
 import com.velocitypowered.api.proxy.ProxyServer
 import org.slf4j.Logger
+import tech.antivpn.sentinel.common.ConsoleWaveLogger
 import tech.antivpn.sentinel.common.DiscordWebhookNotifier
 import tech.antivpn.sentinel.common.SentinelClient
 import tech.antivpn.sentinel.common.SentinelConfig
@@ -44,6 +45,10 @@ class SentinelVelocityPlugin @Inject constructor(
     @Volatile
     lateinit var listManager: SentinelListManager
         private set
+    val waveLogger = ConsoleWaveLogger(
+        infoLogger = { logger.info(it) },
+        warnLogger = { logger.warn(it) }
+    )
 
     @Subscribe
     fun onProxyInitialization(event: ProxyInitializeEvent) {
@@ -90,6 +95,7 @@ class SentinelVelocityPlugin @Inject constructor(
         if (::webhookNotifier.isInitialized) {
             webhookNotifier.shutdown()
         }
+        waveLogger.shutdown()
         logger.info("[Sentinel] Velocity proxy shutdown: cache cleared.")
     }
 

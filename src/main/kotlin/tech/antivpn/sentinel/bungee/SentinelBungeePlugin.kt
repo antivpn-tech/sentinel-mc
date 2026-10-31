@@ -1,6 +1,7 @@
 package tech.antivpn.sentinel.bungee
 
 import net.md_5.bungee.api.plugin.Plugin
+import tech.antivpn.sentinel.common.ConsoleWaveLogger
 import tech.antivpn.sentinel.common.DiscordWebhookNotifier
 import tech.antivpn.sentinel.common.SentinelClient
 import tech.antivpn.sentinel.common.SentinelConfig
@@ -24,6 +25,10 @@ class SentinelBungeePlugin : Plugin() {
     @Volatile
     lateinit var listManager: SentinelListManager
         private set
+    val waveLogger = ConsoleWaveLogger(
+        infoLogger = { logger.info(it) },
+        warnLogger = { logger.warning(it) }
+    )
 
     override fun onEnable() {
         loadConfiguration()
@@ -63,6 +68,7 @@ class SentinelBungeePlugin : Plugin() {
         if (::webhookNotifier.isInitialized) {
             webhookNotifier.shutdown()
         }
+        waveLogger.shutdown()
         logger.info("[Sentinel] BungeeCord proxy shutdown: cache cleared.")
     }
 

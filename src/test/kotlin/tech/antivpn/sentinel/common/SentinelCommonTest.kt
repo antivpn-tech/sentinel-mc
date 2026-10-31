@@ -302,4 +302,40 @@ class SentinelCommonTest {
         assertTrue(lines[4].contains("https://discord.gg/nothing"))
         assertFalse(lines[4].contains("https://discord.gg\n"))
     }
+
+    @Test
+    fun testConsoleWaveLoggerAggregatesFloods() {
+        val infoLogs = mutableListOf<String>()
+        val warnLogs = mutableListOf<String>()
+        val waveLogger = ConsoleWaveLogger(
+            infoLogger = { infoLogs.add(it) },
+            warnLogger = { warnLogs.add(it) }
+        )
+        try {
+            val vpnVerdict = SentinelVerdict(ip = "198.51.100.1", action = "BLOCK", riskScore = 95, threatType = "Commercial VPN", isVpn = true)
+            val gradVerdict = SentinelVerdict(ip = "203.0.113.5", action = "ALLOW", riskScore = 70, confidence = 0.75, threatType = "Residential Tunnel")
+
+            val t0 = 1_000_000L
+            // First 2 events in 2s window log individually
+            waveLogger.logEnforceBlock("Bot1", "198.51.100.1", vpnVerdict, t0)
+            waveLogger.logEnforceBlock("Bot2", "198.51.100.2", vpnVerdict, t0 + 100L)
+            assertEquals(2, warnLogs.size, "First 2 events in calm window must log individually")
+
+            // Events 3..6 within the same 2s window are aggregated
+            waveLogger.logEnforceBlock("Bot3", "198.51.100.3", vpnVerdict, t0 + 200L)
+            waveLogger.logEnforceBlock("Bot4", "198.51.100.4", vpnVerdict, t0 + 300L)
+            waveLogger.logGraduatedDefense("Player5", "203.0.113.5", gradVerdict, t0 + 400L)
+            waveLogger.logBlacklistBlock("BadActor6", "192.0.2.9", t0 + 500L)
+            assertEquals(2, warnLogs.size, "Flood events must be suppressed until summary flush")
+
+            waveLogger.flushSummary()
+            assertEquals(3, warnLogs.size, "Summary flush must emit exactly 1 aggregated warning line")
+            val summary = warnLogs.last()
+            assertTrue(summary.contains("Threat Wave Summary (5s): 4 connections intercepted"))
+            assertTrue(summary.contains("3 blocked, 1 graduated defense"))
+            assertTrue(summary.contains("Commercial VPN: 2"))
+        } finally {
+            waveLogger.shutdown()
+        }
+    }
 }

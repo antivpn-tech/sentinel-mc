@@ -8,6 +8,7 @@ import org.bukkit.command.CommandSender
 import org.bukkit.command.TabCompleter
 import org.bukkit.entity.Player
 import org.bukkit.plugin.java.JavaPlugin
+import tech.antivpn.sentinel.common.ConsoleWaveLogger
 import tech.antivpn.sentinel.common.DiscordWebhookNotifier
 import tech.antivpn.sentinel.common.SentinelClient
 import tech.antivpn.sentinel.common.SentinelConfig
@@ -31,6 +32,10 @@ class SentinelPaperPlugin : JavaPlugin(), CommandExecutor, TabCompleter {
     @Volatile
     lateinit var listManager: SentinelListManager
         private set
+    val waveLogger = ConsoleWaveLogger(
+        infoLogger = { logger.info(it) },
+        warnLogger = { logger.warning(it) }
+    )
 
     override fun onEnable() {
         saveDefaultConfig()
@@ -74,6 +79,7 @@ class SentinelPaperPlugin : JavaPlugin(), CommandExecutor, TabCompleter {
         if (::webhookNotifier.isInitialized) {
             webhookNotifier.shutdown()
         }
+        waveLogger.shutdown()
         logger.info("[Sentinel] Disabled and cache purged.")
     }
 

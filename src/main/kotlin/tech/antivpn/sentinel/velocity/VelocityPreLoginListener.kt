@@ -39,7 +39,7 @@ class VelocityPreLoginListener(private val plugin: SentinelVelocityPlugin) {
         if (plugin.listManager.isBlacklisted(username, ip)) {
             val kickComponent = Component.text("You are blacklisted from this server by Sentinel.", NamedTextColor.RED)
             event.result = PreLoginEvent.PreLoginComponentResult.denied(kickComponent)
-            plugin.logger.warn("[Sentinel] Blacklist: Blocked {} ({})", username, ip)
+            plugin.waveLogger.logBlacklistBlock(username, ip)
             return null
         }
 
@@ -64,10 +64,7 @@ class VelocityPreLoginListener(private val plugin: SentinelVelocityPlugin) {
                                 if (config.graduatedDefense && !verdict.isHardThreat(config.riskThreshold, config.allowGamingOptimizers)) {
                                     // Graduated Defense: Allow connection to protect legitimate players on shared mobile CGNAT pools, but alert staff
                                     plugin.webhookNotifier.sendAlert(username, verdict, false)
-                                    plugin.logger.warn(
-                                        "[Sentinel] GRADUATED DEFENSE: Flagged {} ({}) - {} [Risk: {}/100, Confidence: {}]. Connection allowed; alert dispatched.",
-                                        username, ip, verdict.threatType, verdict.riskScore, verdict.confidence
-                                    )
+                                    plugin.waveLogger.logGraduatedDefense(username, ip, verdict)
                                 } else {
                                     // Deterministic hard threat: Enforce kick
                                     plugin.webhookNotifier.sendAlert(username, verdict, true)
@@ -80,18 +77,12 @@ class VelocityPreLoginListener(private val plugin: SentinelVelocityPlugin) {
                                     val kickComponent = LEGACY_SERIALIZER.deserialize(formattedKick)
 
                                     event.result = PreLoginEvent.PreLoginComponentResult.denied(kickComponent)
-                                    plugin.logger.warn(
-                                        "[Sentinel] ENFORCE: Blocked {} ({}) - Threat: {} [Risk: {}/100]",
-                                        username, ip, verdict.threatType, verdict.riskScore
-                                    )
+                                    plugin.waveLogger.logEnforceBlock(username, ip, verdict)
                                 }
                             } else {
                                 plugin.webhookNotifier.sendAlert(username, verdict, false)
                                 if (isThreat) {
-                                    plugin.logger.info(
-                                        "[Sentinel] AUDIT: Flagged {} ({}) - Threat: {} [Risk: {}/100] (Player Allowed - Audit Mode)",
-                                        username, ip, verdict.threatType, verdict.riskScore
-                                    )
+                                    plugin.waveLogger.logAuditFlag(username, ip, verdict)
                                 }
                             }
                         }
