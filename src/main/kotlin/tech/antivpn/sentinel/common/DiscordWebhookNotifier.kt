@@ -288,7 +288,7 @@ class DiscordWebhookNotifier(
                 .uri(URI.create(config.discordWebhookUrl.trim()))
                 .timeout(Duration.ofSeconds(4))
                 .header("Content-Type", "application/json")
-                .header("User-Agent", "Sentinel-Minecraft-Discord/2.0.0")
+                .header("User-Agent", "Sentinel-Minecraft-Discord/2.0.1")
                 .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
                 .build()
         } catch (e: Exception) {

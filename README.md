@@ -52,11 +52,11 @@ To connect to the Sentinel intelligence network:
 
 ## Installation
 
-1. Download `Sentinel-Minecraft-2.0.0.jar` from the [Releases](https://github.com/antivpn-tech/sentinel-mc-antivpn/releases) page.
+1. Download `Sentinel-Minecraft-2.0.1.jar` from the [Releases](https://github.com/antivpn-tech/sentinel-mc-antivpn/releases) page.
 2. Place the JAR into your server's `plugins/` directory:
-   - Velocity: `/plugins/Sentinel-Minecraft-2.0.0.jar`
-   - BungeeCord / Waterfall: `/plugins/Sentinel-Minecraft-2.0.0.jar`
-   - Paper / Purpur / Spigot: `/plugins/Sentinel-Minecraft-2.0.0.jar`
+   - Velocity: `/plugins/Sentinel-Minecraft-2.0.1.jar`
+   - BungeeCord / Waterfall: `/plugins/Sentinel-Minecraft-2.0.1.jar`
+   - Paper / Purpur / Spigot: `/plugins/Sentinel-Minecraft-2.0.1.jar`
 3. Start the server to generate default configurations.
 4. Configure your license key in `plugins/Sentinel/config.yml` (or `plugins/sentinel/config.yml` on Velocity).
 5. Execute `/sentinel reload` to apply settings.
@@ -154,7 +154,7 @@ cd sentinel-mc-antivpn
 mvn clean package
 ```
 
-The compiled universal JAR will be produced at `target/Sentinel-Minecraft-2.0.0.jar`.
+The compiled universal JAR will be produced at `target/Sentinel-Minecraft-2.0.1.jar`.
 
 ---
 
